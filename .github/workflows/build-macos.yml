@@ -18,9 +18,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 调试期临时只跑 Intel(排队快、run 能快速结束便于取日志);调通后恢复 arm64
-          - runner: macos-13   # Intel
-            label: x86_64
+          # 调试期只跑 Apple Silicon(客户用的就是 arm64 Mac);调通后按需加回 x86_64
+          - runner: macos-14   # Apple Silicon
+            label: arm64
     runs-on: ${{ matrix.runner }}
 
     steps:
