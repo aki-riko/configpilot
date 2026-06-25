@@ -50,7 +50,8 @@ RES_DIR="$APP_BUNDLE/Contents/Resources"
 mkdir -p "$MACOS_DIR" "$RES_DIR"
 
 # standalone 全部内容(可执行 + 依赖)放进 Contents/MacOS
-cp -R "$DIST_DIR"/. "$MACOS_DIR/"
+# BSD cp: 源带尾斜杠 = 复制目录内容(含隐藏文件)进目标,不嵌套
+cp -R "$DIST_DIR"/ "$MACOS_DIR"/
 chmod +x "$MACOS_DIR/$APP_NAME"
 
 # 图标
@@ -84,9 +85,10 @@ echo "[OK] app bundle 组装完成: $APP_BUNDLE"
 
 # 3) ad-hoc 签名(整体签,不用 --deep;先签内部 dylib 再签 bundle)
 echo "[INFO] 开始 ad-hoc 签名..."
-# 先逐个签嵌套的 .dylib/.so(避免 bundle 签名时内部未签报错)
-find "$APP_BUNDLE/Contents/MacOS" \( -name "*.dylib" -o -name "*.so" \) -print0 \
-  | xargs -0 -I{} codesign --force --sign - --timestamp=none {} 2>&1 || true
+# 先逐个签嵌套的 .dylib/.so/.framework 二进制(避免 bundle 签名时内部未签报错)
+while IFS= read -r -d '' f; do
+  codesign --force --sign - --timestamp=none "$f"
+done < <(find "$APP_BUNDLE/Contents/MacOS" \( -name "*.dylib" -o -name "*.so" \) -type f -print0)
 # 再签可执行文件和整个 bundle
 codesign --force --sign - --timestamp=none "$MACOS_DIR/$APP_NAME"
 codesign --force --sign - --timestamp=none "$APP_BUNDLE"
