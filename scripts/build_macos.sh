@@ -83,19 +83,11 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
 PLIST
 echo "[OK] app bundle 组装完成: $APP_BUNDLE"
 
-# 3) ad-hoc 签名(不用 --deep;先签内部 dylib/so,再签整个 bundle)
-echo "[INFO] 开始 ad-hoc 签名..."
-# 先逐个签嵌套的 .dylib/.so(避免 bundle 签名时内部未签报错)
-while IFS= read -r -d '' f; do
-  codesign --force --sign - --timestamp=none "$f"
-done < <(find "$APP_BUNDLE/Contents/MacOS" \( -name "*.dylib" -o -name "*.so" \) -type f -print0)
-# 不单独签 Contents/MacOS/ 下的主可执行文件(codesign 会因 Info.plist 的 CFBundleExecutable
-# 指向它而报 "bundle format unrecognized"——主程序由签整个 bundle 时自动处理)
-# 直接签整个 .app bundle
-codesign --force --sign - --timestamp=none "$APP_BUNDLE"
-echo "[INFO] 验证签名:"
-codesign --verify --verbose=2 "$APP_BUNDLE" || { echo "[ERROR] 签名验证失败"; exit 1; }
-echo "[OK] ad-hoc 签名完成"
+# 3) 不做代码签名。
+# 原因:ad-hoc 签名(codesign -s -)对 Nuitka 平铺布局的 .app 会报 "bundle format
+# unrecognized",且 ad-hoc 签名本来也不能让 .app 免 macOS Gatekeeper——
+# 客户首次打开仍需"右键→打开"。所以不签名,交付未签名 .app,客户右键打开即可。
+echo "[INFO] 跳过代码签名(交付未签名 .app,客户首次需右键→打开绕过 Gatekeeper)"
 
 # 4) 打 DMG
 mkdir -p dist
