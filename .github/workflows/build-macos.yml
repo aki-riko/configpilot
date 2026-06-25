@@ -11,6 +11,10 @@ on:
         required: false
         default: "1.0.0"
 
+# 让 Attach to release 步骤能创建 Release(默认 GITHUB_TOKEN 只读)
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build ${{ matrix.label }}
