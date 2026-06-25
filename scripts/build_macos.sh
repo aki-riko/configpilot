@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Codex 配置助手 —— macOS Nuitka 打包脚本
-# 产出 build/CodexConfig.app,再用 hdiutil 打成 dist/CodexConfig_<ver>_<arch>.dmg
-# 需先在同一 venv 里 pip install -r requirements.txt nuitka,并已生成 resources/app_icon.icns
+# Codex 配置助手 —— macOS 打包脚本
+# 策略:Nuitka 只出 standalone 目录(不用 --macos-create-app-bundle,绕开其内置 codesign --deep 在 CI 上的 FATAL),
+#       脚本手动组装 .app bundle + 自己 ad-hoc 签名(不带 --deep,整体签,报错可见) + hdiutil 打 DMG。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -16,16 +16,10 @@ ARCH="$(uname -m)"   # arm64 或 x86_64
 FQ="$("$PY" -c 'import os, prismqml; print(os.path.dirname(prismqml.__file__))')"
 echo "[INFO] prismqml 路径: $FQ"
 
-# 换参数前先删 build,避免残留产物干扰
 rm -rf build
+mkdir -p build
 
-ICON_ARGS=()
-if [ -f "resources/app_icon.icns" ]; then
-  ICON_ARGS+=(--macos-app-icon=resources/app_icon.icns)
-else
-  echo "[WARN] 缺少 resources/app_icon.icns,将使用默认图标"
-fi
-
+# 1) Nuitka standalone(普通目录,不创建 app bundle → 不触发 Nuitka 内置签名)
 "$PY" -m nuitka \
   --standalone \
   --assume-yes-for-downloads \
@@ -37,43 +31,77 @@ fi
   --include-data-files=providers.json=providers.json \
   --include-package=prismqml \
   --include-package=backend \
-  --macos-create-app-bundle \
-  --macos-app-name="$APP_NAME" \
-  "${ICON_ARGS[@]}" \
-  --company-name=9li \
-  --product-name="$APP_NAME" \
-  --product-version="$APP_VER" \
   --output-dir=build \
   --output-filename="$APP_NAME" \
   main.py
 
-APP_BUNDLE="build/main.app"
-if [ ! -d "$APP_BUNDLE" ]; then
-  # Nuitka 不同版本可能用 output-filename 命名 bundle
-  APP_BUNDLE="build/${APP_NAME}.app"
+DIST_DIR="build/main.dist"
+if [ ! -d "$DIST_DIR" ]; then
+  echo "[ERROR] 未找到 standalone 产物 $DIST_DIR,build 内容:"; ls -la build; exit 1
 fi
-if [ ! -d "$APP_BUNDLE" ]; then
-  echo "[ERROR] 未找到 .app 产物,build 目录内容:"
-  ls -la build
-  exit 1
-fi
-echo "[OK] app bundle: $APP_BUNDLE"
+echo "[OK] standalone 目录: $DIST_DIR"
 
-# 打 DMG
+#__APP_ASSEMBLY__
+# 2) 手动组装 .app bundle
+APP_BUNDLE="build/${APP_NAME}.app"
+rm -rf "$APP_BUNDLE"
+MACOS_DIR="$APP_BUNDLE/Contents/MacOS"
+RES_DIR="$APP_BUNDLE/Contents/Resources"
+mkdir -p "$MACOS_DIR" "$RES_DIR"
+
+# standalone 全部内容(可执行 + 依赖)放进 Contents/MacOS
+cp -R "$DIST_DIR"/. "$MACOS_DIR/"
+chmod +x "$MACOS_DIR/$APP_NAME"
+
+# 图标
+if [ -f "resources/app_icon.icns" ]; then
+  cp "resources/app_icon.icns" "$RES_DIR/app_icon.icns"
+  ICON_PLIST="<key>CFBundleIconFile</key><string>app_icon</string>"
+else
+  echo "[WARN] 缺 resources/app_icon.icns"; ICON_PLIST=""
+fi
+
+# Info.plist
+cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>${APP_NAME}</string>
+  <key>CFBundleDisplayName</key><string>${APP_NAME}</string>
+  <key>CFBundleExecutable</key><string>${APP_NAME}</string>
+  <key>CFBundleIdentifier</key><string>life.9li.codexconfig</string>
+  <key>CFBundleVersion</key><string>${APP_VER}</string>
+  <key>CFBundleShortVersionString</key><string>${APP_VER}</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSMinimumSystemVersion</key><string>11.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  ${ICON_PLIST}
+</dict>
+</plist>
+PLIST
+echo "[OK] app bundle 组装完成: $APP_BUNDLE"
+
+# 3) ad-hoc 签名(整体签,不用 --deep;先签内部 dylib 再签 bundle)
+echo "[INFO] 开始 ad-hoc 签名..."
+# 先逐个签嵌套的 .dylib/.so(避免 bundle 签名时内部未签报错)
+find "$APP_BUNDLE/Contents/MacOS" \( -name "*.dylib" -o -name "*.so" \) -print0 \
+  | xargs -0 -I{} codesign --force --sign - --timestamp=none {} 2>&1 || true
+# 再签可执行文件和整个 bundle
+codesign --force --sign - --timestamp=none "$MACOS_DIR/$APP_NAME"
+codesign --force --sign - --timestamp=none "$APP_BUNDLE"
+echo "[INFO] 验证签名:"
+codesign --verify --verbose=2 "$APP_BUNDLE" || { echo "[ERROR] 签名验证失败"; exit 1; }
+echo "[OK] ad-hoc 签名完成"
+
+# 4) 打 DMG
 mkdir -p dist
 DMG_PATH="dist/${APP_NAME}_${APP_VER}_${ARCH}.dmg"
 rm -f "$DMG_PATH"
-
 STAGING="build/dmg_staging"
-rm -rf "$STAGING"
-mkdir -p "$STAGING"
+rm -rf "$STAGING"; mkdir -p "$STAGING"
 cp -R "$APP_BUNDLE" "$STAGING/${APP_NAME}.app"
 ln -s /Applications "$STAGING/Applications"
-
-hdiutil create \
-  -volname "$APP_NAME" \
-  -srcfolder "$STAGING" \
-  -ov -format UDZO \
-  "$DMG_PATH"
-
+hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING" -ov -format UDZO "$DMG_PATH"
 echo "[OK] DMG 产物: $DMG_PATH"
+
