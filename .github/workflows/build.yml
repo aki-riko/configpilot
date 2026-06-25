@@ -130,7 +130,10 @@ jobs:
         run: |
           ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
           [ -f "$ISCC" ] || ISCC="/c/Program Files/Inno Setup 6/ISCC.exe"
-          "$ISCC" "/DAppVer=${{ steps.ver.outputs.app_ver }}" CodexConfig.iss
+          # 直接 sed 改 .iss 里的版本号,避开 Git-bash 对 /D 参数的路径转换坑
+          sed -i 's/AppVer "1.0.0"/AppVer "${{ steps.ver.outputs.app_ver }}"/' CodexConfig.iss
+          grep -n AppVer CodexConfig.iss
+          "$ISCC" CodexConfig.iss
           ls -la installer/
 
       - name: Upload artifact
