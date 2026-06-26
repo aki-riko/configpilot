@@ -1,5 +1,5 @@
 # Codex 配置助手 运行依赖
 # 安装: pip install -r requirements.txt
 
-prismqml>=0.2.14
+prismqml>=0.2.15
 PySide6>=6.6.0

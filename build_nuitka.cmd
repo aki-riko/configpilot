@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-REM Codex 配置助手 —— Nuitka 打包(独立 venv: quicksketch\.venv, prismqml 0.2.14)
+REM Codex 配置助手 —— Nuitka 打包(独立 venv: quicksketch\.venv, prismqml 0.2.15)
 cd /d "%~dp0"
 set PY=.venv\Scripts\python.exe
 set FQ=.venv\Lib\site-packages\prismqml
