@@ -118,7 +118,7 @@ class CodexConfigAuthTests(unittest.TestCase):
                 self.assertEqual(
                     config.contextPresetForModel(model),
                     {
-                        "buttonText": "套用 GPT-5.6 默认上下文",
+                        "menuText": "GPT-5.6 默认上下文",
                         "contextWindow": 372000,
                         "autoCompactLimit": 353000,
                         "toolOutputLimit": 6000,
@@ -135,7 +135,7 @@ class CodexConfigAuthTests(unittest.TestCase):
             self.assertEqual(
                 config.contextPresetForModel("gpt-5.5"),
                 {
-                    "buttonText": "套用 GPT-5.5 稳定上下文",
+                    "menuText": "GPT-5.5 稳定上下文",
                     "contextWindow": 258400,
                     "autoCompactLimit": 245000,
                     "toolOutputLimit": 6000,
@@ -150,6 +150,21 @@ class CodexConfigAuthTests(unittest.TestCase):
                 ["", "low", "medium", "high", "xhigh"],
             )
             self.assertEqual(config.contextPresetForModel("custom-model"), {})
+            self.assertEqual(
+                config.contextPresetOptions(),
+                [
+                    {"id": "gpt-5.5", "text": "GPT-5.5 稳定上下文"},
+                    {"id": "gpt-5.6", "text": "GPT-5.6 默认上下文"},
+                ],
+            )
+            self.assertEqual(
+                config.contextPresetSelection("gpt-5.6", "gpt-5.6-terra")["model"],
+                "gpt-5.6-terra",
+            )
+            self.assertEqual(
+                config.contextPresetSelection("gpt-5.6", "gpt-5.5")["model"],
+                "gpt-5.6-sol",
+            )
 
     def test_apply_real_gpt56_config_sample(self):
         codex_config = self.load_module()

@@ -300,6 +300,14 @@ class CodexConfig(QObject):
     def contextPresetForModel(self, model):
         return self._model_profiles.context_preset(model)
 
+    @Slot(result="QVariantList")
+    def contextPresetOptions(self):
+        return self._model_profiles.context_preset_options()
+
+    @Slot(str, str, result="QVariantMap")
+    def contextPresetSelection(self, profile_id, current_model):
+        return self._model_profiles.context_preset_selection(profile_id, current_model)
+
     @staticmethod
     def _set_block_scalar(block, key, value, is_str=True):
         """设置/删除 provider 块内标量字段。value 为 None 时删除。"""

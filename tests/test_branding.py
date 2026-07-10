@@ -84,6 +84,13 @@ class BrandingTests(unittest.TestCase):
             self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
             self.assertEqual(struct.unpack(">II", png[16:24]), expected)
 
+    def test_context_presets_use_dropdown_button_without_relay_picker(self):
+        view = self.read("qml/views/CodexView.qml")
+        self.assertNotIn('text: "选择中转"', view)
+        self.assertNotIn("id: presetBox", view)
+        self.assertIn("feature: Fluent.Enums.button.feature_dropdown", view)
+        self.assertIn("menuItems: root.contextPresetOptions", view)
+
 
 if __name__ == "__main__":
     unittest.main()

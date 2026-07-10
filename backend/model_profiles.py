@@ -48,6 +48,9 @@ class ModelProfiles:
         pattern_text = str(raw_profile.get("modelPattern", "")).strip()
         if not profile_id or not pattern_text:
             raise ValueError(f"profiles[{index}] 缺少 id 或 modelPattern")
+        default_model = str(raw_profile.get("defaultModel", "")).strip()
+        if not default_model:
+            raise ValueError(f"{profile_id} 缺少 defaultModel")
         try:
             pattern = re.compile(pattern_text, re.IGNORECASE)
         except re.error as exc:
@@ -55,6 +58,7 @@ class ModelProfiles:
         return {
             "id": profile_id,
             "pattern": pattern,
+            "defaultModel": default_model,
             "reasoningOptions": cls._normalize_options(
                 raw_profile.get("reasoningOptions"),
                 f"{profile_id}.reasoningOptions",
@@ -68,7 +72,9 @@ class ModelProfiles:
     def _normalize_context(raw_context, profile_id):
         if not isinstance(raw_context, dict):
             raise ValueError(f"{profile_id}.contextPreset 必须是对象")
-        result = {"buttonText": str(raw_context.get("buttonText", "")).strip()}
+        result = {"menuText": str(raw_context.get("menuText", "")).strip()}
+        if not result["menuText"]:
+            raise ValueError(f"{profile_id}.contextPreset 缺少 menuText")
         numeric_fields = (
             "contextWindow",
             "autoCompactLimit",
@@ -108,6 +114,25 @@ class ModelProfiles:
     def context_preset(self, model):
         profile = self.profile_for(model)
         return dict(profile["contextPreset"]) if profile else {}
+
+    def context_preset_options(self):
+        return [
+            {"id": profile["id"], "text": profile["contextPreset"]["menuText"]}
+            for profile in self._profiles
+            if profile["contextPreset"]
+        ]
+
+    def context_preset_selection(self, profile_id, current_model):
+        profile = next(
+            (item for item in self._profiles if item["id"] == profile_id),
+            None,
+        )
+        if not profile:
+            return {}
+        model = str(current_model or "").strip()
+        if not profile["pattern"].search(model):
+            model = profile["defaultModel"]
+        return {"model": model, **profile["contextPreset"]}
 
     def clamp_context_window(self, model, value):
         return self._clamp_context_value(model, value, "maxContextWindow")

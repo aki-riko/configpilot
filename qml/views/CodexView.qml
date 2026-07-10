@@ -21,6 +21,9 @@ Item {
     readonly property var currentContextPreset: CodexConfig
                                                 ? CodexConfig.contextPresetForModel(fModel)
                                                 : ({})
+    readonly property var contextPresetOptions: CodexConfig
+                                                ? CodexConfig.contextPresetOptions()
+                                                : []
     readonly property real contextWindowNumber: parsePositive(fContextWindow)
     readonly property real autoCompactNumber: parsePositive(fAutoCompactLimit)
     readonly property real compactRatio: contextWindowNumber > 0 && autoCompactNumber > 0
@@ -43,6 +46,13 @@ Item {
         fContextWindow = String(preset.contextWindow)
         fAutoCompactLimit = String(preset.autoCompactLimit)
         fToolOutputLimit = String(preset.toolOutputLimit)
+    }
+
+    function useContextPresetOption(option) {
+        var selection = CodexConfig
+                        ? CodexConfig.contextPresetSelection(option.id, fModel)
+                        : ({})
+        if (selection && selection.model) selectModel(selection.model)
     }
 
     function selectModel(modelName) {
@@ -126,37 +136,6 @@ Item {
                     topPadding: Fluent.Enums.spacing.l
                     bottomPadding: Fluent.Enums.spacing.l
                     spacing: Fluent.Enums.spacing.m
-
-                    Text {
-                        text: "选择中转"
-                        font.pixelSize: Fluent.Enums.typography.subtitle
-                        font.bold: true
-                        color: Fluent.Enums.textColor.primary
-                        font.family: Fluent.Enums.fontFamily
-                    }
-
-                    // 预置中转下拉:选中后填入下方各字段
-                    Fluent.ComboBoxDefault {
-                        id: presetBox
-                        width: parent ? parent.width - Fluent.Enums.spacing.l * 2 : 0
-                        property var presetList: CodexConfig ? CodexConfig.presets : []
-                        model: {
-                            var arr = []
-                            for (var i = 0; i < presetList.length; i++) arr.push(presetList[i].name)
-                            arr.push("自定义…")
-                            return arr
-                        }
-                        onActivated: function(index) {
-                            if (index >= 0 && index < presetList.length) {
-                                var p = presetList[index]
-                                root.fBaseUrl = p.baseUrl
-                                root.fProvider = p.provider
-                                root.fWireApi = p.wireApi
-                                root.selectModel(p.model)
-                            }
-                            // 选「自定义…」则不改字段,留用户手填
-                        }
-                    }
 
                     //__FIELDS__
                     // base_url(主字段)
@@ -393,10 +372,15 @@ Item {
                             spacing: Fluent.Enums.spacing.m
                             Fluent.Button {
                                 style: Fluent.Enums.button.style_default
-                                text: root.currentContextPreset.buttonText
-                                      || "当前模型无内置上下文预设"
-                                enabled: !!root.currentContextPreset.contextWindow
-                                onClicked: root.useModelContextPreset(root.fModel)
+                                feature: Fluent.Enums.button.feature_dropdown
+                                text: "套用上下文预设"
+                                menuItems: root.contextPresetOptions
+                                enabled: root.contextPresetOptions.length > 0
+                                onMenuItemClicked: function(index, text) {
+                                    if (index >= 0 && index < root.contextPresetOptions.length) {
+                                        root.useContextPresetOption(root.contextPresetOptions[index])
+                                    }
+                                }
                             }
                             Fluent.Button {
                                 style: Fluent.Enums.button.style_default

@@ -11,6 +11,7 @@
     {
       "id": "gpt-5.5",
       "modelPattern": "^gpt-5\\.5$",
+      "defaultModel": "gpt-5.5",
       "reasoningOptions": [
         { "value": "", "text": "(不设置)" },
         { "value": "low", "text": "low" },
@@ -19,7 +20,7 @@
         { "value": "xhigh", "text": "xhigh" }
       ],
       "contextPreset": {
-        "buttonText": "套用 GPT-5.5 稳定上下文",
+        "menuText": "GPT-5.5 稳定上下文",
         "contextWindow": 258400,
         "autoCompactLimit": 245000,
         "toolOutputLimit": 6000,
@@ -30,6 +31,7 @@
     {
       "id": "gpt-5.6",
       "modelPattern": "^gpt-5\\.6(?:-|$)",
+      "defaultModel": "gpt-5.6-sol",
       "reasoningOptions": [
         { "value": "", "text": "(不设置)" },
         { "value": "low", "text": "极低" },
@@ -40,7 +42,7 @@
         { "value": "max", "text": "最高" }
       ],
       "contextPreset": {
-        "buttonText": "套用 GPT-5.6 默认上下文",
+        "menuText": "GPT-5.6 默认上下文",
         "contextWindow": 372000,
         "autoCompactLimit": 353000,
         "toolOutputLimit": 6000,
