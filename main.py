@@ -10,8 +10,10 @@ import sys
 # 让 QML XHR 可读本地文件(Translator 加载 i18n 所需)
 os.environ.setdefault("QT_LOGGING_RULES", "qt.text.font.db=false")
 os.environ.setdefault("QML_XHR_ALLOW_FILE_READ", "1")
+os.environ.setdefault("PRISMQML_APP_USER_MODEL_ID", "PrismQML.ConfigPilot")
 
 from PySide6.QtCore import QUrl
+from PySide6.QtGui import QIcon
 from prismqml import App
 
 
@@ -19,6 +21,19 @@ def main() -> int:
     # App 自动完成 DPI / 消息处理器 / register_types / 异步孵化控制器
     app = App(sys.argv)
     engine = app.engine
+
+    # 在创建 QML Window 前设置应用级图标，避免 Windows 任务栏先缓存通用图标。
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    taskbar_icon_path = os.path.join(
+        app_dir,
+        "resources",
+        "app_icon.ico" if sys.platform == "win32" else "app_icon.svg",
+    )
+    taskbar_icon = QIcon(taskbar_icon_path)
+    if taskbar_icon.isNull():
+        print(f"[WARN] 应用图标加载失败: {taskbar_icon_path}", file=sys.stderr)
+    else:
+        app.setWindowIcon(taskbar_icon)
 
     # 指向 prismqml 包目录(其下 PrismQML/qmldir 提供 QML 模块)
     import prismqml
@@ -39,7 +54,6 @@ def main() -> int:
         print(f"[WARN] 注册 SVG 图片提供器失败: {exc}", file=sys.stderr)
 
     # 应用图标 URL(窗口/任务栏)
-    app_dir = os.path.dirname(os.path.abspath(__file__))
     logo_path = os.path.join(app_dir, "resources", "app_icon.svg")
     engine.rootContext().setContextProperty(
         "AppLogo",

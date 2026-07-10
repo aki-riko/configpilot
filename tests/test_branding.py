@@ -67,6 +67,24 @@ class BrandingTests(unittest.TestCase):
         self.assertIn('[InstallDelete]', installer)
         self.assertIn('#define AppLegacyName "Codex 配置助手"', installer)
         self.assertIn('#define LegacyAppExe "CodexConfig.exe"', installer)
+        self.assertIn('#define LegacyInstallDirName "CodexConfig"', installer)
+        self.assertIn("UsePreviousAppDir=no", installer)
+        self.assertIn("UsePreviousGroup=no", installer)
+        self.assertIn("IsOwnedLegacyInstallDir", installer)
+        self.assertIn("if CurStep <> ssPostInstall then", installer)
+        self.assertIn("保留非标准旧安装目录", installer)
+
+    def test_windows_shortcuts_match_prismqml_app_user_model_id(self):
+        installer = self.read("ConfigPilot.iss")
+        main = self.read("main.py")
+
+        self.assertIn('#define AppUserModelID "PrismQML.ConfigPilot"', installer)
+        self.assertEqual(installer.count('AppUserModelID: "{#AppUserModelID}"'), 2)
+        self.assertIn(
+            'os.environ.setdefault("PRISMQML_APP_USER_MODEL_ID", "PrismQML.ConfigPilot")',
+            main,
+        )
+        self.assertIn("app.setWindowIcon(taskbar_icon)", main)
 
     def test_icon_sources_are_valid_and_windows_icon_has_multiple_sizes(self):
         svg_path = ROOT / "resources" / "app_icon.svg"
@@ -124,7 +142,7 @@ class BrandingTests(unittest.TestCase):
         self.assertIn("minimumHeight: 560", main)
 
     def test_release_version_and_macos_disclosure_are_consistent(self):
-        version = "1.0.8"
+        version = "1.0.9"
         self.assertIn(f'set "APP_VER={version}"', self.read("build_nuitka.cmd"))
         self.assertIn(f'#define AppVer "{version}"', self.read("ConfigPilot.iss"))
 
@@ -135,7 +153,7 @@ class BrandingTests(unittest.TestCase):
         readme = self.read("README.md")
         macos_build = self.read("scripts/build_macos.sh")
         first_open = self.read("docs/macos-first-open.txt")
-        release_notes = self.read("docs/release-notes/v1.0.8.md")
+        release_notes = self.read("docs/release-notes/v1.0.9.md")
 
         for content in (readme, first_open, release_notes):
             self.assertIn("Apple Developer Program", content)
