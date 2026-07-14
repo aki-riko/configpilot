@@ -60,11 +60,15 @@ def main() -> int:
         QUrl.fromLocalFile(logo_path).toString() if os.path.isfile(logo_path) else ""
     )
 
-    # 注册 Codex 配置后端
+    # 注册 AI 工具配置后端
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from backend.codex_config import CodexConfig
+    from backend.claude_desktop_config import ClaudeDesktopConfig
+
     codex = CodexConfig()
+    claude_desktop = ClaudeDesktopConfig()
     engine.rootContext().setContextProperty("CodexConfig", codex)
+    engine.rootContext().setContextProperty("ClaudeDesktopConfig", claude_desktop)
 
     qml_main = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qml", "main.qml")
     engine.load(QUrl.fromLocalFile(qml_main))

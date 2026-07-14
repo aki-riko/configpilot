@@ -15,7 +15,8 @@ QtObject {
     }
 
     property var navItems: [
-        { "text": "配置", "icon": iconPath("Settings") }
+        { "text": "Codex", "icon": iconPath("Settings") },
+        { "text": "Claude Desktop", "icon": iconPath("WindowDevTools") }
     ]
 
     property var bottomNavItems: [
@@ -24,6 +25,7 @@ QtObject {
 
     property var pagePaths: [
         Qt.resolvedUrl("views/CodexView.qml"),
+        Qt.resolvedUrl("views/ClaudeDesktopView.qml"),
         Qt.resolvedUrl("views/AboutView.qml")
     ]
 
