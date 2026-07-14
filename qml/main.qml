@@ -16,7 +16,7 @@ QtObject {
 
     property var navItems: [
         { "text": "Codex", "icon": iconPath("Settings") },
-        { "text": "Claude Desktop", "icon": iconPath("WindowDevTools") }
+        { "text": "Claude", "icon": iconPath("WindowDevTools") }
     ]
 
     property var bottomNavItems: [

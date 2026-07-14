@@ -17,7 +17,7 @@ class ClaudeDesktopUiTests(unittest.TestCase):
         self.assertIn(
             'setContextProperty("ClaudeDesktopConfig", claude_desktop)', main_py
         )
-        self.assertIn('"text": "Claude Desktop"', main_qml)
+        self.assertIn('"text": "Claude"', main_qml)
         self.assertIn('Qt.resolvedUrl("views/ClaudeDesktopView.qml")', main_qml)
 
     def test_page_wires_gateway_sensitive_fields_and_status_sections(self):
