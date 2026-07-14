@@ -11,9 +11,14 @@ Fluent.Card {
     property bool gatewayCanEnable: false
     property string profileName: ""
     property string configPath: ""
+    readonly property var installOptions: [
+        { "text": "安装 Claude Code CLI", "id": "claude-code" },
+        { "text": "安装 Claude Desktop", "id": "claude-desktop" }
+    ]
 
     signal developerModeToggled(bool value)
     signal gatewayToggled(bool value)
+    signal installRequested(string product)
 
     autoHeight: true
 
@@ -48,9 +53,23 @@ Fluent.Card {
                 }
                 Fluent.Badge {
                     text: root.installed ? "已安装" : "未检测到安装"
+                    visible: root.installed
                     level: root.installed
                            ? Fluent.Enums.statusLevel.success
                            : Fluent.Enums.statusLevel.warning
+                }
+                Fluent.Button {
+                    objectName: "claudeInstallDropdown"
+                    visible: !root.installed
+                    style: Fluent.Enums.button.style_default
+                    feature: Fluent.Enums.button.feature_dropdown
+                    text: "获取 Claude"
+                    menuItems: root.installOptions
+                    onMenuItemClicked: function(index, text) {
+                        if (index >= 0 && index < root.installOptions.length) {
+                            root.installRequested(root.installOptions[index].id)
+                        }
+                    }
                 }
             }
 

@@ -160,6 +160,11 @@ Item {
                         ClaudeDesktopConfig.setThirdPartyEnabled(value)
                     }
                 }
+                onInstallRequested: function(product) {
+                    if (ClaudeDesktopConfig) {
+                        ClaudeDesktopConfig.openOfficialInstallSource(product)
+                    }
+                }
             }
 
             ClaudeGatewaySection {

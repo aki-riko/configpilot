@@ -1,0 +1,12 @@
+{
+  "claudeCode": {
+    "all": "https://code.claude.com/docs/en/overview"
+  },
+  "claudeDesktop": {
+    "windows-x64": "https://claude.ai/api/desktop/win32/x64/setup/latest/redirect",
+    "windows-arm64": "https://claude.ai/api/desktop/win32/arm64/setup/latest/redirect",
+    "macos-universal": "https://claude.ai/api/desktop/darwin/universal/dmg/latest/redirect",
+    "linux": "https://code.claude.com/docs/en/desktop-linux",
+    "fallback": "https://claude.com/download"
+  }
+}

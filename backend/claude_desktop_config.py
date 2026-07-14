@@ -15,12 +15,17 @@ import uuid
 from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 
+from backend.claude_install_sources import (
+    claude_desktop_installed,
+    claude_install_target,
+    official_install_url,
+)
+
 
 LOGGER = logging.getLogger(__name__)
 
 CLAUDE_APP_NAME = "Claude"
 CLAUDE_THIRD_PARTY_DIR_NAME = "Claude-3p"
-CLAUDE_INSTALL_DIR_NAME = "AnthropicClaude"
 CONFIG_FILE_NAME = "claude_desktop_config.json"
 DEVELOPER_SETTINGS_FILE_NAME = "developer_settings.json"
 CONFIG_LIBRARY_DIR_NAME = "configLibrary"
@@ -49,17 +54,6 @@ def _third_party_data_dir() -> Path:
         if local_app_data:
             return Path(local_app_data) / CLAUDE_THIRD_PARTY_DIR_NAME
     return Path.home() / "Library" / "Application Support" / CLAUDE_THIRD_PARTY_DIR_NAME
-
-
-def _claude_install_target() -> Path:
-    override = os.environ.get("CONFIGPILOT_CLAUDE_EXECUTABLE")
-    if override:
-        return Path(override).expanduser()
-    if os.name == "nt":
-        local_app_data = os.environ.get("LOCALAPPDATA")
-        if local_app_data:
-            return Path(local_app_data) / CLAUDE_INSTALL_DIR_NAME / "claude.exe"
-    return Path("/Applications/Claude.app")
 
 
 def _read_json_object(path: Path, *, default: dict | None = None) -> dict:
@@ -175,7 +169,7 @@ class ClaudeDesktopConfig(QObject):
         super().__init__(parent)
         self._primary_dir = _primary_data_dir()
         self._data_dir = _third_party_data_dir()
-        self._install_target = _claude_install_target()
+        self._install_target = claude_install_target()
         self._config_library_dir = self._data_dir / CONFIG_LIBRARY_DIR_NAME
         self._meta_path = self._config_library_dir / CONFIG_LIBRARY_META_FILE_NAME
         self._desktop_config_path = self._data_dir / CONFIG_FILE_NAME
@@ -271,7 +265,7 @@ class ClaudeDesktopConfig(QObject):
 
     @Slot()
     def reload(self):
-        self._installed = self._install_target.exists()
+        self._installed = claude_desktop_installed(self._install_target)
         self._developer_mode_enabled = False
         self._third_party_enabled = False
         self._endpoint = ""
@@ -391,6 +385,29 @@ class ClaudeDesktopConfig(QObject):
             raise ValueError("当前配置档案不是 Gateway 类型")
         _validate_endpoint(str(profile.get("inferenceGatewayBaseUrl", "")))
         return profile
+
+    @Slot(str)
+    def openOfficialInstallSource(self, product):
+        try:
+            product_name = {
+                "claude-code": "Claude Code CLI",
+                "claude-desktop": "Claude Desktop",
+            }.get(product)
+            if not product_name:
+                raise ValueError("未知的 Claude 安装项")
+            url = official_install_url(product)
+            if not QDesktopServices.openUrl(QUrl(url)):
+                raise RuntimeError("系统未能打开官方安装入口")
+            self.notify.emit(
+                0,
+                f"已打开 {product_name} 官方安装入口",
+                "请按 Anthropic 官方页面提示完成安装。",
+            )
+        except ValueError as exc:
+            self.notify.emit(2, "安装入口不可用", str(exc))
+        except Exception as exc:
+            LOGGER.exception("打开 Claude 官方安装入口失败")
+            self.notify.emit(3, "打开失败", str(exc))
 
     @Slot(bool)
     def setDeveloperModeEnabled(self, enabled):

@@ -18,6 +18,14 @@ class ClaudeDesktopConfigTests(unittest.TestCase):
         sys.modules.pop("backend.claude_desktop_config", None)
         return importlib.import_module("backend.claude_desktop_config")
 
+    def load_install_module(self):
+        import importlib
+        import sys
+
+        sys.path.insert(0, str(ROOT))
+        sys.modules.pop("backend.claude_install_sources", None)
+        return importlib.import_module("backend.claude_install_sources")
+
     def make_config(self, module, root: Path):
         primary = root / "Claude"
         third_party = root / "Claude-3p"
@@ -294,6 +302,84 @@ class ClaudeDesktopConfigTests(unittest.TestCase):
             self.assertFalse(config.thirdPartyEnabled)
             self.assertEqual(notices[-1][0], 2)
             self.assertIn("尚未保存 Gateway 配置", notices[-1][2])
+
+    def test_official_install_sources_are_selected_for_each_platform(self):
+        install_module = self.load_install_module()
+        module = self.load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, _, _ = self.make_config(module, root)
+            source_path = ROOT / "resources" / "claude_install_sources.json"
+            sources = json.loads(source_path.read_text(encoding="utf-8"))
+            cases = (
+                ("win32", "AMD64", "windows-x64"),
+                ("win32", "ARM64", "windows-arm64"),
+                ("darwin", "arm64", "macos-universal"),
+                ("linux", "x86_64", "linux"),
+                ("freebsd13", "amd64", "fallback"),
+            )
+
+            with mock.patch.object(
+                module.QDesktopServices, "openUrl", return_value=True
+            ) as open_url:
+                for platform_name, machine, source_key in cases:
+                    with self.subTest(platform=platform_name, machine=machine):
+                        with mock.patch.object(
+                            install_module.sys, "platform", platform_name
+                        ), mock.patch.object(
+                            install_module.platform, "machine", return_value=machine
+                        ):
+                            config.openOfficialInstallSource("claude-desktop")
+                        opened = open_url.call_args.args[0].toString()
+                        self.assertEqual(
+                            opened, sources["claudeDesktop"][source_key]
+                        )
+
+                config.openOfficialInstallSource("claude-code")
+                opened = open_url.call_args.args[0].toString()
+                self.assertEqual(opened, sources["claudeCode"]["all"])
+
+    def test_linux_install_detection_uses_official_apt_package(self):
+        module = self.load_install_module()
+        installed = mock.Mock(
+            returncode=0,
+            stdout="install ok installed\n",
+        )
+        missing = mock.Mock(returncode=1, stdout="")
+
+        with mock.patch.object(module.sys, "platform", "linux"), mock.patch.object(
+            module.subprocess, "run", return_value=installed
+        ) as run:
+            self.assertTrue(module.claude_desktop_installed(None))
+        run.assert_called_once_with(
+            ["dpkg-query", "-W", "-f=${Status}", "claude-desktop"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+
+        with mock.patch.object(module.sys, "platform", "linux"), mock.patch.object(
+            module.subprocess, "run", return_value=missing
+        ):
+            self.assertFalse(module.claude_desktop_installed(None))
+
+    def test_unknown_install_product_does_not_open_external_url(self):
+        module = self.load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, _, _ = self.make_config(module, root)
+            notices = []
+            config.notify.connect(
+                lambda level, title, message: notices.append((level, title, message))
+            )
+
+            with mock.patch.object(module.QDesktopServices, "openUrl") as open_url:
+                config.openOfficialInstallSource("unknown")
+
+            open_url.assert_not_called()
+            self.assertEqual(notices[-1][0], 2)
+            self.assertIn("未知的 Claude 安装项", notices[-1][2])
 
     def test_invalid_input_does_not_create_configuration(self):
         module = self.load_module()

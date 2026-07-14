@@ -47,6 +47,12 @@ class ClaudeDesktopUiTests(unittest.TestCase):
         self.assertIn("signal gatewayToggled(bool value)", status)
         self.assertIn("ClaudeDesktopConfig.setDeveloperModeEnabled(value)", page)
         self.assertIn("ClaudeDesktopConfig.setThirdPartyEnabled(value)", page)
+        self.assertIn("Fluent.Enums.button.feature_dropdown", status)
+        self.assertIn('objectName: "claudeInstallDropdown"', status)
+        self.assertIn('"text": "安装 Claude Code CLI"', status)
+        self.assertIn('"text": "安装 Claude Desktop"', status)
+        self.assertIn("signal installRequested(string product)", status)
+        self.assertIn("ClaudeDesktopConfig.openOfficialInstallSource(product)", page)
 
         self.assertIn("Authorization: Bearer", gateway)
         self.assertIn("x-api-key", gateway)
