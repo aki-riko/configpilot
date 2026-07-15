@@ -120,6 +120,16 @@ class BrandingTests(unittest.TestCase):
         self.assertEqual((reserved, image_type), (0, 1))
         self.assertGreaterEqual(image_count, 7)
 
+    def test_navigation_uses_bundled_product_icons(self):
+        main_qml = self.read("qml/main.qml")
+        self.assertIn('resourceIconPath("chatgpt")', main_qml)
+        self.assertIn('resourceIconPath("claude")', main_qml)
+
+        for icon_name in ("chatgpt.svg", "claude.svg"):
+            icon = self.read(f"resources/{icon_name}")
+            self.assertIn("<svg", icon)
+            self.assertIn("viewBox=", icon)
+
     def test_documentation_images_have_expected_dimensions(self):
         expected_dimensions = {
             "docs/images/configpilot-main.png": (980, 640),

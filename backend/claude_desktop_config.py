@@ -18,8 +18,8 @@ from PySide6.QtGui import QDesktopServices
 from backend.claude_install_sources import (
     claude_desktop_installed,
     claude_install_target,
-    official_install_url,
 )
+from backend.claude_installer import ClaudeInstaller
 
 
 LOGGER = logging.getLogger(__name__)
@@ -163,6 +163,7 @@ class ClaudeDesktopConfig(QObject):
     """读取并安全写入 Claude Desktop 的第三方推理配置库。"""
 
     changed = Signal()
+    installChanged = Signal()
     notify = Signal(int, str, str)
 
     def __init__(self, parent=None):
@@ -170,6 +171,9 @@ class ClaudeDesktopConfig(QObject):
         self._primary_dir = _primary_data_dir()
         self._data_dir = _third_party_data_dir()
         self._install_target = claude_install_target()
+        self._installer = ClaudeInstaller(self)
+        self._installer.changed.connect(self.installChanged.emit)
+        self._installer.notify.connect(self.notify.emit)
         self._config_library_dir = self._data_dir / CONFIG_LIBRARY_DIR_NAME
         self._meta_path = self._config_library_dir / CONFIG_LIBRARY_META_FILE_NAME
         self._desktop_config_path = self._data_dir / CONFIG_FILE_NAME
@@ -236,6 +240,22 @@ class ClaudeDesktopConfig(QObject):
     @Property(str, notify=changed)
     def profileName(self):
         return self._profile_name
+
+    @Property(bool, notify=installChanged)
+    def installBusy(self):
+        return self._installer.busy
+
+    @Property(bool, notify=installChanged)
+    def installCancelable(self):
+        return self._installer.cancelable
+
+    @Property(int, notify=installChanged)
+    def installProgress(self):
+        return self._installer.progress
+
+    @Property(str, notify=installChanged)
+    def installStatus(self):
+        return self._installer.status
 
     @staticmethod
     def _validated_entries(meta: dict) -> list[dict]:
@@ -387,27 +407,12 @@ class ClaudeDesktopConfig(QObject):
         return profile
 
     @Slot(str)
-    def openOfficialInstallSource(self, product):
-        try:
-            product_name = {
-                "claude-code": "Claude Code CLI",
-                "claude-desktop": "Claude Desktop",
-            }.get(product)
-            if not product_name:
-                raise ValueError("未知的 Claude 安装项")
-            url = official_install_url(product)
-            if not QDesktopServices.openUrl(QUrl(url)):
-                raise RuntimeError("系统未能打开官方安装入口")
-            self.notify.emit(
-                0,
-                f"已打开 {product_name} 官方安装入口",
-                "请按 Anthropic 官方页面提示完成安装。",
-            )
-        except ValueError as exc:
-            self.notify.emit(2, "安装入口不可用", str(exc))
-        except Exception as exc:
-            LOGGER.exception("打开 Claude 官方安装入口失败")
-            self.notify.emit(3, "打开失败", str(exc))
+    def installProduct(self, product):
+        self._installer.install(product)
+
+    @Slot()
+    def cancelInstall(self):
+        self._installer.cancel()
 
     @Slot(bool)
     def setDeveloperModeEnabled(self, enabled):

@@ -305,39 +305,50 @@ class ClaudeDesktopConfigTests(unittest.TestCase):
 
     def test_official_install_sources_are_selected_for_each_platform(self):
         install_module = self.load_install_module()
-        module = self.load_module()
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            config, _, _ = self.make_config(module, root)
-            source_path = ROOT / "resources" / "claude_install_sources.json"
-            sources = json.loads(source_path.read_text(encoding="utf-8"))
-            cases = (
-                ("win32", "AMD64", "windows-x64"),
-                ("win32", "ARM64", "windows-arm64"),
-                ("darwin", "arm64", "macos-universal"),
-                ("linux", "x86_64", "linux"),
-                ("freebsd13", "amd64", "fallback"),
+        sources = json.loads(
+            (ROOT / "resources" / "claude_install_sources.json").read_text(
+                encoding="utf-8"
             )
+        )
+        cases = (
+            ("win32", "AMD64", "windows-x64", "windows-exe"),
+            ("win32", "ARM64", "windows-arm64", "windows-exe"),
+            ("darwin", "arm64", "macos-universal", "macos-dmg"),
+            ("linux", "x86_64", "linux", "linux-deb"),
+        )
+        for platform_name, machine, source_key, expected_kind in cases:
+            with self.subTest(platform=platform_name, machine=machine), mock.patch.object(
+                install_module.sys, "platform", platform_name
+            ), mock.patch.object(
+                install_module.platform, "machine", return_value=machine
+            ):
+                spec = install_module.official_install_spec("claude-desktop")
+                self.assertEqual(spec.kind, expected_kind)
+                source = sources["claudeDesktop"][source_key]
+                if expected_kind == "linux-deb":
+                    self.assertEqual(spec.help_url, source["helpUrl"])
+                    self.assertIn("binary-amd64/Packages", spec.packages_url)
+                else:
+                    self.assertEqual(spec.url, source["url"])
 
-            with mock.patch.object(
-                module.QDesktopServices, "openUrl", return_value=True
-            ) as open_url:
-                for platform_name, machine, source_key in cases:
-                    with self.subTest(platform=platform_name, machine=machine):
-                        with mock.patch.object(
-                            install_module.sys, "platform", platform_name
-                        ), mock.patch.object(
-                            install_module.platform, "machine", return_value=machine
-                        ):
-                            config.openOfficialInstallSource("claude-desktop")
-                        opened = open_url.call_args.args[0].toString()
-                        self.assertEqual(
-                            opened, sources["claudeDesktop"][source_key]
-                        )
+        for platform_name, expected_key, expected_kind in (
+            ("win32", "windows", "powershell-script"),
+            ("linux", "unix", "shell-script"),
+            ("darwin", "unix", "shell-script"),
+        ):
+            with self.subTest(code_platform=platform_name), mock.patch.object(
+                install_module.sys, "platform", platform_name
+            ):
+                spec = install_module.official_install_spec("claude-code")
+            self.assertEqual(spec.kind, expected_kind)
+            self.assertEqual(spec.url, sources["claudeCode"][expected_key]["url"])
 
-                config.openOfficialInstallSource("claude-code")
-                opened = open_url.call_args.args[0].toString()
-                self.assertEqual(opened, sources["claudeCode"]["all"])
+        windows_urls = [
+            sources["claudeDesktop"][key]["url"]
+            for key in ("windows-x64", "windows-arm64")
+        ]
+        self.assertTrue(all("microsoft" not in url.lower() for url in windows_urls))
+        self.assertTrue(all("/api/desktop/win32/" in url for url in windows_urls))
 
     def test_linux_install_detection_uses_official_apt_package(self):
         module = self.load_install_module()
@@ -364,7 +375,7 @@ class ClaudeDesktopConfigTests(unittest.TestCase):
         ):
             self.assertFalse(module.claude_desktop_installed(None))
 
-    def test_unknown_install_product_does_not_open_external_url(self):
+    def test_unknown_install_product_does_not_start_download(self):
         module = self.load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -374,10 +385,7 @@ class ClaudeDesktopConfigTests(unittest.TestCase):
                 lambda level, title, message: notices.append((level, title, message))
             )
 
-            with mock.patch.object(module.QDesktopServices, "openUrl") as open_url:
-                config.openOfficialInstallSource("unknown")
-
-            open_url.assert_not_called()
+            config.installProduct("unknown")
             self.assertEqual(notices[-1][0], 2)
             self.assertIn("未知的 Claude 安装项", notices[-1][2])
 

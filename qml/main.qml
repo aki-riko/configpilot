@@ -14,9 +14,13 @@ QtObject {
         return (typeof FluentIconsDir !== "undefined" ? FluentIconsDir : "") + name + ".svg"
     }
 
+    function resourceIconPath(name) {
+        return Qt.resolvedUrl("../resources/" + name + ".svg")
+    }
+
     property var navItems: [
-        { "text": "Codex", "icon": iconPath("Settings") },
-        { "text": "Claude", "icon": iconPath("WindowDevTools") }
+        { "text": "Codex", "icon": resourceIconPath("chatgpt") },
+        { "text": "Claude", "icon": resourceIconPath("claude") }
     ]
 
     property var bottomNavItems: [

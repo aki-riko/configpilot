@@ -38,7 +38,19 @@ class ClaudeDesktopUiTests(unittest.TestCase):
         self.assertIn("完全退出并重新打开 Claude Desktop", page)
         self.assertIn('text: "启用并应用"', page)
 
-        self.assertIn("columns: width < 700 ? 2 : 4", status)
+        self.assertIn("columns: width < 700 ? 1 : 2", status)
+        self.assertIn("id: statusGrid", status)
+        self.assertIn("columns: width < 480 ? 1 : 3", status)
+        self.assertIn("uniformCellWidths: columns === 3", status)
+        self.assertIn("readonly property real equalItemWidth", status)
+        self.assertEqual(
+            status.count("Layout.preferredWidth: statusGrid.equalItemWidth"), 3
+        )
+        self.assertEqual(
+            status.count("Layout.maximumWidth: statusGrid.equalItemWidth"), 3
+        )
+        self.assertIn("Layout.preferredWidth: summaryLayout.columns === 2", status)
+        self.assertIn("summaryLayout.width - 240", status)
         self.assertIn('text: "Claude Desktop"', status)
         self.assertEqual(status.count("Fluent.Toggle"), 2)
         self.assertIn('objectName: "claudeDeveloperModeToggle"', status)
@@ -49,10 +61,15 @@ class ClaudeDesktopUiTests(unittest.TestCase):
         self.assertIn("ClaudeDesktopConfig.setThirdPartyEnabled(value)", page)
         self.assertIn("Fluent.Enums.button.feature_dropdown", status)
         self.assertIn('objectName: "claudeInstallDropdown"', status)
-        self.assertIn('"text": "安装 Claude Code CLI"', status)
-        self.assertIn('"text": "安装 Claude Desktop"', status)
+        self.assertIn('"text": "Claude Code CLI"', status)
+        self.assertIn("Claude Desktop 官网版", status)
+        self.assertIn("Layout.maximumWidth: 240", status)
         self.assertIn("signal installRequested(string product)", status)
-        self.assertIn("ClaudeDesktopConfig.openOfficialInstallSource(product)", page)
+        self.assertIn("signal cancelInstallRequested()", status)
+        self.assertIn("Fluent.ProgressBar", status)
+        self.assertIn("ClaudeDesktopConfig.installProduct(product)", page)
+        self.assertIn("ClaudeDesktopConfig.cancelInstall()", page)
+        self.assertIn("ClaudeDesktopConfig.installProgress", page)
 
         self.assertIn("Authorization: Bearer", gateway)
         self.assertIn("x-api-key", gateway)

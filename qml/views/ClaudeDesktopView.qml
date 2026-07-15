@@ -146,6 +146,14 @@ Item {
                 thirdPartyEnabled: ClaudeDesktopConfig
                                    ? ClaudeDesktopConfig.thirdPartyEnabled
                                    : false
+                installBusy: ClaudeDesktopConfig ? ClaudeDesktopConfig.installBusy : false
+                installCancelable: ClaudeDesktopConfig
+                                   ? ClaudeDesktopConfig.installCancelable
+                                   : false
+                installProgress: ClaudeDesktopConfig
+                                 ? ClaudeDesktopConfig.installProgress
+                                 : -1
+                installStatus: ClaudeDesktopConfig ? ClaudeDesktopConfig.installStatus : ""
                 gatewayCanEnable: root.fEndpoint.trim().length > 0
                                   && profileName.length > 0
                 profileName: ClaudeDesktopConfig ? ClaudeDesktopConfig.profileName : ""
@@ -162,8 +170,11 @@ Item {
                 }
                 onInstallRequested: function(product) {
                     if (ClaudeDesktopConfig) {
-                        ClaudeDesktopConfig.openOfficialInstallSource(product)
+                        ClaudeDesktopConfig.installProduct(product)
                     }
+                }
+                onCancelInstallRequested: if (ClaudeDesktopConfig) {
+                    ClaudeDesktopConfig.cancelInstall()
                 }
             }
 

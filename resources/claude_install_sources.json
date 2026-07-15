@@ -1,12 +1,63 @@
 {
+  "security": {
+    "allowedHosts": [
+      "claude.ai",
+      "downloads.claude.ai"
+    ],
+    "helpHosts": [
+      "code.claude.com"
+    ],
+    "maxInstallerBytes": 1073741824,
+    "maxScriptBytes": 2097152,
+    "maxMetadataBytes": 8388608,
+    "networkTimeoutSeconds": 45,
+    "verificationTimeoutSeconds": 300,
+    "downloadChunkBytes": 262144,
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/136.0 Safari/537.36",
+    "windowsPublisher": "Anthropic, PBC"
+  },
   "claudeCode": {
-    "all": "https://code.claude.com/docs/en/overview"
+    "windows": {
+      "kind": "powershell-script",
+      "url": "https://claude.ai/install.ps1",
+      "fileName": "install.ps1"
+    },
+    "unix": {
+      "kind": "shell-script",
+      "url": "https://claude.ai/install.sh",
+      "fileName": "install.sh"
+    }
   },
   "claudeDesktop": {
-    "windows-x64": "https://claude.ai/api/desktop/win32/x64/setup/latest/redirect",
-    "windows-arm64": "https://claude.ai/api/desktop/win32/arm64/setup/latest/redirect",
-    "macos-universal": "https://claude.ai/api/desktop/darwin/universal/dmg/latest/redirect",
-    "linux": "https://code.claude.com/docs/en/desktop-linux",
-    "fallback": "https://claude.com/download"
+    "windows-x64": {
+      "kind": "windows-exe",
+      "url": "https://claude.ai/api/desktop/win32/x64/setup/latest/redirect",
+      "fileName": "ClaudeSetup.exe",
+      "resolveRedirectWithCurl": true
+    },
+    "windows-arm64": {
+      "kind": "windows-exe",
+      "url": "https://claude.ai/api/desktop/win32/arm64/setup/latest/redirect",
+      "fileName": "ClaudeSetup.exe",
+      "resolveRedirectWithCurl": true
+    },
+    "macos-universal": {
+      "kind": "macos-dmg",
+      "url": "https://claude.ai/api/desktop/darwin/universal/dmg/latest/redirect",
+      "fileName": "Claude.dmg",
+      "resolveRedirectWithCurl": true
+    },
+    "linux": {
+      "kind": "linux-deb",
+      "packagesUrlTemplate": "https://downloads.claude.ai/claude-desktop/apt/stable/dists/stable/main/binary-{architecture}/Packages",
+      "repositoryBaseUrl": "https://downloads.claude.ai/claude-desktop/apt/stable/",
+      "helpUrl": "https://code.claude.com/docs/en/desktop-linux",
+      "architectures": {
+        "x86-64": "amd64",
+        "amd64": "amd64",
+        "aarch64": "arm64",
+        "arm64": "arm64"
+      }
+    }
   }
 }
