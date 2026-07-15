@@ -5,6 +5,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -212,6 +213,53 @@ class CodexConfigAuthTests(unittest.TestCase):
             self.assertEqual(saved["model_context_window"], 372000)
             self.assertEqual(saved["model_auto_compact_token_limit"], 353000)
             self.assertEqual(saved["tool_output_token_limit"], 6000)
+
+    def test_model_fetch_notification_does_not_embed_model_list(self):
+        codex_config = self.load_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            codex_home = tmp_path / ".codex"
+            codex_home.mkdir()
+            codex_config._codex_home = lambda: str(codex_home)
+            codex_config._app_dir = lambda: str(ROOT)
+            config = codex_config.CodexConfig()
+            config.notify.emissions.clear()
+
+            model_ids = [
+                "codex-auto-review",
+                "gpt-5.4",
+                "gpt-5.4-mini",
+                "gpt-5.5",
+                "gpt-5.5-openai-compact",
+                "gpt-5.6-luna",
+                "gpt-5.6-sol",
+                "gpt-5.6-terra",
+                "model-9",
+                "model-10",
+                "model-11",
+            ]
+
+            class Response:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, traceback):
+                    return False
+
+                def read(self):
+                    return json.dumps(
+                        {"data": [{"id": model_id} for model_id in model_ids]}
+                    ).encode("utf-8")
+
+            with patch("urllib.request.urlopen", return_value=Response()):
+                config._fetch_models_worker("https://example.test/v1", "")
+
+            self.assertEqual(config.availableModels, model_ids)
+            self.assertEqual(
+                config.notify.emissions[-1],
+                (1, "获取到 11 个模型", "可在模型下拉列表中选择"),
+            )
 
 
 if __name__ == "__main__":

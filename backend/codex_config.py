@@ -537,8 +537,11 @@ class CodexConfig(QObject):
                 return
             self._available_models = ids
             self.modelsChanged.emit()
-            preview = ", ".join(ids[:8]) + (f" 等 {len(ids)} 个" if len(ids) > 8 else "")
-            self.notify.emit(1, f"获取到 {len(ids)} 个模型", preview)
+            self.notify.emit(
+                1,
+                f"获取到 {len(ids)} 个模型",
+                "可在模型下拉列表中选择",
+            )
         except urllib.error.HTTPError as e:
             self.notify.emit(3, "获取失败", f"HTTP {e.code}: {e.reason}")
         except Exception as e:
