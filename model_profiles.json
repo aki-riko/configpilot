@@ -31,13 +31,10 @@
       "id": "gpt-5.6",
       "modelPattern": "^gpt-5\\.6(?:-|$)",
       "reasoningOptions": [
-        { "value": "", "text": "(不设置)" },
-        { "value": "low", "text": "极低" },
-        { "value": "medium", "text": "轻度" },
-        { "value": "high", "text": "中" },
-        { "value": "xhigh", "text": "高" },
-        { "value": "ultra", "text": "极高" },
-        { "value": "max", "text": "最高" }
+        { "value": "low", "text": "轻度" },
+        { "value": "medium", "text": "中" },
+        { "value": "high", "text": "高" },
+        { "value": "xhigh", "text": "极高" }
       ]
     }
   ]

@@ -110,14 +110,14 @@ class CodexConfigAuthTests(unittest.TestCase):
             codex_config._app_dir = lambda: str(ROOT)
             config = codex_config.CodexConfig()
 
-            expected_values = ["", "low", "medium", "high", "xhigh", "ultra", "max"]
-            expected_text = ["(不设置)", "极低", "轻度", "中", "高", "极高", "最高"]
+            expected_values = ["low", "medium", "high", "xhigh"]
+            expected_text = ["轻度", "中", "高", "极高"]
             for model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
                 options = config.reasoningOptionsForModel(model)
                 self.assertEqual([item["value"] for item in options], expected_values)
                 self.assertEqual([item["text"] for item in options], expected_text)
                 self.assertEqual(
-                    config.highestReasoningEffortForModel(model), "max"
+                    config.highestReasoningEffortForModel(model), "xhigh"
                 )
                 self.assertEqual(
                     config.contextPresetForModel(model),
@@ -189,6 +189,7 @@ class CodexConfigAuthTests(unittest.TestCase):
             codex_config._app_dir = lambda: str(ROOT)
             config = codex_config.CodexConfig()
 
+            config.notify.emissions.clear()
             config.applyConfig(
                 {
                     "baseUrl": "https://api.9li.life/v1",
@@ -196,6 +197,24 @@ class CodexConfigAuthTests(unittest.TestCase):
                     "wireApi": "responses",
                     "model": "gpt-5.6-sol",
                     "reasoningEffort": "max",
+                }
+            )
+            self.assertEqual(
+                config.notify.emissions[-1],
+                (2, "参数无效", "gpt-5.6-sol 不支持思考等级 max"),
+            )
+            with config_path.open("rb") as handle:
+                rejected = codex_config.tomllib.load(handle)
+            self.assertNotIn("model", rejected)
+            self.assertNotIn("model_reasoning_effort", rejected)
+
+            config.applyConfig(
+                {
+                    "baseUrl": "https://api.9li.life/v1",
+                    "provider": "relay",
+                    "wireApi": "responses",
+                    "model": "gpt-5.6-sol",
+                    "reasoningEffort": "xhigh",
                     "modelContextWindow": "372000",
                     "modelAutoCompactTokenLimit": "353000",
                     "toolOutputTokenLimit": "6000",
@@ -205,7 +224,7 @@ class CodexConfigAuthTests(unittest.TestCase):
             with config_path.open("rb") as handle:
                 saved = codex_config.tomllib.load(handle)
             self.assertEqual(saved["model"], "gpt-5.6-sol")
-            self.assertEqual(saved["model_reasoning_effort"], "max")
+            self.assertEqual(saved["model_reasoning_effort"], "xhigh")
             self.assertEqual(saved["model_context_window"], 258400)
             self.assertEqual(saved["model_auto_compact_token_limit"], 245000)
             self.assertEqual(saved["tool_output_token_limit"], 6000)
