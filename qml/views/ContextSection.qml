@@ -6,14 +6,13 @@ Fluent.Card {
     id: root
 
     property var currentPreset: ({})
-    property var presetOptions: []
     property string contextWindowValue: ""
     property string autoCompactValue: ""
     property string toolOutputValue: ""
     property real compactRatio: 0
     property string compactRatioText: "未设置"
 
-    signal presetRequested(string profileId)
+    signal presetRequested()
     signal contextWindowEdited(string value)
     signal autoCompactEdited(string value)
     signal toolOutputEdited(string value)
@@ -73,15 +72,9 @@ Fluent.Card {
 
             Fluent.Button {
                 style: Fluent.Enums.button.style_default
-                feature: Fluent.Enums.button.feature_dropdown
-                text: "套用上下文预设"
-                menuItems: root.presetOptions
-                enabled: root.presetOptions.length > 0
-                onMenuItemClicked: function(index, text) {
-                    if (index >= 0 && index < root.presetOptions.length) {
-                        root.presetRequested(root.presetOptions[index].id)
-                    }
-                }
+                text: "套用稳定上下文"
+                enabled: root.currentPreset.contextWindow > 0
+                onClicked: root.presetRequested()
             }
             Fluent.Button {
                 style: Fluent.Enums.button.style_default

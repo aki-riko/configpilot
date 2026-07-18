@@ -24,11 +24,8 @@ Item {
                                        ? Fluent.Enums.spacing.l
                                        : Fluent.Enums.spacing.xl
     readonly property var currentContextPreset: CodexConfig
-                                                ? CodexConfig.contextPresetForModel(fModel)
+                                                ? CodexConfig.stableContextPreset()
                                                 : ({})
-    readonly property var contextPresetOptions: CodexConfig
-                                                ? CodexConfig.contextPresetOptions()
-                                                : []
     readonly property real contextWindowNumber: parsePositive(fContextWindow)
     readonly property real autoCompactNumber: parsePositive(fAutoCompactLimit)
     readonly property real compactRatio: contextWindowNumber > 0 && autoCompactNumber > 0
@@ -98,11 +95,12 @@ Item {
         if (normalizedModel !== committedModel) selectModel(normalizedModel)
     }
 
-    function useContextPreset(profileId) {
-        var selection = CodexConfig
-                        ? CodexConfig.contextPresetSelection(profileId, fModel)
-                        : ({})
-        if (selection && selection.model) selectModel(selection.model)
+    function useStableContextPreset() {
+        var preset = CodexConfig ? CodexConfig.stableContextPreset() : ({})
+        if (!preset || !preset.contextWindow) return
+        fContextWindow = String(preset.contextWindow)
+        fAutoCompactLimit = String(preset.autoCompactLimit)
+        fToolOutputLimit = String(preset.toolOutputLimit)
     }
 
     function clearContext() {
@@ -272,15 +270,12 @@ Item {
                 objectName: "contextSection"
                 width: pageColumn.innerWidth
                 currentPreset: root.currentContextPreset
-                presetOptions: root.contextPresetOptions
                 contextWindowValue: root.fContextWindow
                 autoCompactValue: root.fAutoCompactLimit
                 toolOutputValue: root.fToolOutputLimit
                 compactRatio: root.compactRatio
                 compactRatioText: root.compactRatioLabel()
-                onPresetRequested: function(profileId) {
-                    root.useContextPreset(profileId)
-                }
+                onPresetRequested: root.useStableContextPreset()
                 onContextWindowEdited: function(value) {
                     root.fContextWindow = value
                 }

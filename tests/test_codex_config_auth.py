@@ -122,12 +122,12 @@ class CodexConfigAuthTests(unittest.TestCase):
                 self.assertEqual(
                     config.contextPresetForModel(model),
                     {
-                        "menuText": "GPT-5.6 默认上下文",
-                        "contextWindow": 372000,
-                        "autoCompactLimit": 353000,
+                        "menuText": "稳定上下文",
+                        "contextWindow": 258400,
+                        "autoCompactLimit": 245000,
                         "toolOutputLimit": 6000,
-                        "maxContextWindow": 372000,
-                        "maxAutoCompactLimit": 353000,
+                        "maxContextWindow": 258400,
+                        "maxAutoCompactLimit": 245000,
                     },
                 )
 
@@ -142,7 +142,7 @@ class CodexConfigAuthTests(unittest.TestCase):
             self.assertEqual(
                 config.contextPresetForModel("gpt-5.5"),
                 {
-                    "menuText": "GPT-5.5 稳定上下文",
+                    "menuText": "稳定上下文",
                     "contextWindow": 258400,
                     "autoCompactLimit": 245000,
                     "toolOutputLimit": 6000,
@@ -161,19 +161,15 @@ class CodexConfigAuthTests(unittest.TestCase):
             )
             self.assertEqual(config.contextPresetForModel("custom-model"), {})
             self.assertEqual(
-                config.contextPresetOptions(),
-                [
-                    {"id": "gpt-5.5", "text": "GPT-5.5 稳定上下文"},
-                    {"id": "gpt-5.6", "text": "GPT-5.6 默认上下文"},
-                ],
-            )
-            self.assertEqual(
-                config.contextPresetSelection("gpt-5.6", "gpt-5.6-terra")["model"],
-                "gpt-5.6-terra",
-            )
-            self.assertEqual(
-                config.contextPresetSelection("gpt-5.6", "gpt-5.5")["model"],
-                "gpt-5.6-sol",
+                config.stableContextPreset(),
+                {
+                    "menuText": "稳定上下文",
+                    "contextWindow": 258400,
+                    "autoCompactLimit": 245000,
+                    "toolOutputLimit": 6000,
+                    "maxContextWindow": 258400,
+                    "maxAutoCompactLimit": 245000,
+                },
             )
 
     def test_apply_real_gpt56_config_sample(self):
@@ -210,8 +206,8 @@ class CodexConfigAuthTests(unittest.TestCase):
                 saved = codex_config.tomllib.load(handle)
             self.assertEqual(saved["model"], "gpt-5.6-sol")
             self.assertEqual(saved["model_reasoning_effort"], "max")
-            self.assertEqual(saved["model_context_window"], 372000)
-            self.assertEqual(saved["model_auto_compact_token_limit"], 353000)
+            self.assertEqual(saved["model_context_window"], 258400)
+            self.assertEqual(saved["model_auto_compact_token_limit"], 245000)
             self.assertEqual(saved["tool_output_token_limit"], 6000)
 
     def test_model_fetch_notification_does_not_embed_model_list(self):

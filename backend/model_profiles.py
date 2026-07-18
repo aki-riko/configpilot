@@ -9,9 +9,10 @@ from pathlib import Path
 
 
 class ModelProfiles:
-    def __init__(self, default_options, profiles):
+    def __init__(self, default_options, profiles, stable_context_preset):
         self._default_options = default_options
         self._profiles = profiles
+        self._stable_context_preset = stable_context_preset
 
     @classmethod
     def from_file(cls, path):
@@ -25,7 +26,10 @@ class ModelProfiles:
             cls._normalize_profile(item, index)
             for index, item in enumerate(data.get("profiles", []))
         ]
-        return cls(default_options, profiles)
+        stable_context_preset = cls._normalize_context(
+            data.get("stableContextPreset", {}), "stableContextPreset"
+        )
+        return cls(default_options, profiles, stable_context_preset)
 
     @staticmethod
     def _normalize_options(raw_options, field_name):
@@ -48,9 +52,6 @@ class ModelProfiles:
         pattern_text = str(raw_profile.get("modelPattern", "")).strip()
         if not profile_id or not pattern_text:
             raise ValueError(f"profiles[{index}] 缺少 id 或 modelPattern")
-        default_model = str(raw_profile.get("defaultModel", "")).strip()
-        if not default_model:
-            raise ValueError(f"{profile_id} 缺少 defaultModel")
         try:
             pattern = re.compile(pattern_text, re.IGNORECASE)
         except re.error as exc:
@@ -58,23 +59,19 @@ class ModelProfiles:
         return {
             "id": profile_id,
             "pattern": pattern,
-            "defaultModel": default_model,
             "reasoningOptions": cls._normalize_options(
                 raw_profile.get("reasoningOptions"),
                 f"{profile_id}.reasoningOptions",
             ),
-            "contextPreset": cls._normalize_context(
-                raw_profile.get("contextPreset", {}), profile_id
-            ),
         }
 
     @staticmethod
-    def _normalize_context(raw_context, profile_id):
+    def _normalize_context(raw_context, field_name):
         if not isinstance(raw_context, dict):
-            raise ValueError(f"{profile_id}.contextPreset 必须是对象")
+            raise ValueError(f"{field_name} 必须是对象")
         result = {"menuText": str(raw_context.get("menuText", "")).strip()}
         if not result["menuText"]:
-            raise ValueError(f"{profile_id}.contextPreset 缺少 menuText")
+            raise ValueError(f"{field_name} 缺少 menuText")
         numeric_fields = (
             "contextWindow",
             "autoCompactLimit",
@@ -87,7 +84,7 @@ class ModelProfiles:
                 continue
             value = int(raw_context[field])
             if value <= 0:
-                raise ValueError(f"{profile_id}.{field} 必须大于 0")
+                raise ValueError(f"{field_name}.{field} 必须大于 0")
             result[field] = value
         return result
 
@@ -120,27 +117,10 @@ class ModelProfiles:
         )
 
     def context_preset(self, model):
-        profile = self.profile_for(model)
-        return dict(profile["contextPreset"]) if profile else {}
+        return dict(self._stable_context_preset) if self.profile_for(model) else {}
 
-    def context_preset_options(self):
-        return [
-            {"id": profile["id"], "text": profile["contextPreset"]["menuText"]}
-            for profile in self._profiles
-            if profile["contextPreset"]
-        ]
-
-    def context_preset_selection(self, profile_id, current_model):
-        profile = next(
-            (item for item in self._profiles if item["id"] == profile_id),
-            None,
-        )
-        if not profile:
-            return {}
-        model = str(current_model or "").strip()
-        if not profile["pattern"].search(model):
-            model = profile["defaultModel"]
-        return {"model": model, **profile["contextPreset"]}
+    def stable_context_preset(self):
+        return dict(self._stable_context_preset)
 
     def clamp_context_window(self, model, value):
         return self._clamp_context_value(model, value, "maxContextWindow")

@@ -40,7 +40,7 @@ Item {
                         font.family: Fluent.Enums.fontFamily
                     }
                     Text {
-                        text: "ConfigPilot 是 AI 工具配置与自动化中心。当前版本同时管理 Codex CLI 与 Claude Desktop 的第三方连接。\n\n• Codex：管理连接、模型、推理和上下文配置\n• Codex：套用 GPT-5.5 / GPT-5.6 上下文预设并获取模型列表\n• Claude Desktop：一键启用 Developer Mode 与 Third-Party Inference\n• Claude Desktop：配置 Gateway endpoint、认证方式、模型和额外 Header\n• 敏感字段留空默认保留，写入前自动创建 .bak\n• 改完后必须完全退出并重新打开对应应用"
+                        text: "ConfigPilot 是 AI 工具配置与自动化中心。当前版本同时管理 Codex CLI 与 Claude Desktop 的第三方连接。\n\n• Codex：管理连接、模型、推理和上下文配置\n• Codex：套用统一的 GPT-5.5 稳定上下文并获取模型列表\n• Claude Desktop：一键启用 Developer Mode 与 Third-Party Inference\n• Claude Desktop：配置 Gateway endpoint、认证方式、模型和额外 Header\n• 敏感字段留空默认保留，写入前自动创建 .bak\n• 改完后必须完全退出并重新打开对应应用"
                         font.pixelSize: Fluent.Enums.typography.body
                         color: Fluent.Enums.textColor.secondary
                         font.family: Fluent.Enums.fontFamily
