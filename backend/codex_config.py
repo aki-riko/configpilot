@@ -49,6 +49,7 @@ class CodexConfig(QObject):
         self._providers_path = os.path.join(_app_dir(), "providers.json")
         self._model_profiles_path = os.path.join(_app_dir(), "model_profiles.json")
         self._model_profiles = ModelProfiles.from_file(self._model_profiles_path)
+        self._config_exists = False
         self._provider = ""
         self._base_url = ""
         self._wire_api = ""
@@ -74,31 +75,39 @@ class CodexConfig(QObject):
         )
         self._config_tasks.busyChanged.connect(self.operationBusyChanged.emit)
         self._presets = []
-        self._load_presets()
+        self.reloadPresets()
         self.reload()
 
     #__PRESETS__
     # ---------- 预置中转列表 ----------
-    def _load_presets(self):
+    def _read_presets(self):
         """读 providers.json。结构: [{"name","baseUrl","provider","wireApi","model"}]"""
-        self._presets = []
-        if os.path.isfile(self._providers_path):
-            try:
-                with open(self._providers_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                items = data.get("presets", data) if isinstance(data, dict) else data
-                for it in items:
-                    if not isinstance(it, dict) or not it.get("baseUrl"):
-                        continue
-                    self._presets.append({
-                        "name": str(it.get("name", it.get("baseUrl", ""))),
-                        "baseUrl": str(it.get("baseUrl", "")),
-                        "provider": str(it.get("provider", "relay")),
-                        "wireApi": str(it.get("wireApi", DEFAULT_WIRE_API)),
-                        "model": str(it.get("model", DEFAULT_MODEL)),
-                    })
-            except Exception as e:
-                self.notify.emit(2, "预置列表读取失败", f"providers.json: {e}")
+        if not os.path.isfile(self._providers_path):
+            return []
+        with open(self._providers_path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        items = data.get("presets", data) if isinstance(data, dict) else data
+        presets = []
+        for item in items:
+            if not isinstance(item, dict) or not item.get("baseUrl"):
+                continue
+            presets.append(
+                {
+                    "name": str(item.get("name", item.get("baseUrl", ""))),
+                    "baseUrl": str(item.get("baseUrl", "")),
+                    "provider": str(item.get("provider", "relay")),
+                    "wireApi": str(item.get("wireApi", DEFAULT_WIRE_API)),
+                    "model": str(item.get("model", DEFAULT_MODEL)),
+                }
+            )
+        return presets
+
+    def _apply_presets(self, presets):
+        self._presets = list(presets)
+        self.providersChanged.emit()
+
+    def _presets_failed(self, exc):
+        self.notify.emit(2, "预置列表读取失败", f"providers.json: {exc}")
 
     @Property("QVariantList", notify=providersChanged)
     def presets(self):
@@ -162,7 +171,7 @@ class CodexConfig(QObject):
 
     @Property(bool, notify=changed)
     def configExists(self):
-        return os.path.isfile(self._config_path)
+        return self._config_exists
 
     @Property(bool, notify=operationBusyChanged)
     def operationBusy(self):
@@ -183,6 +192,7 @@ class CodexConfig(QObject):
     # ---------- 读 ----------
     @Slot()
     def _apply_snapshot(self, snapshot):
+        self._config_exists = bool(snapshot["configExists"])
         self._provider = str(snapshot["provider"])
         self._base_url = str(snapshot["baseUrl"])
         self._wire_api = str(snapshot["wireApi"])
@@ -216,8 +226,11 @@ class CodexConfig(QObject):
 
     @Slot()
     def reloadPresets(self):
-        self._load_presets()
-        self.providersChanged.emit()
+        self._config_tasks.submit(
+            self._read_presets,
+            self._apply_presets,
+            self._presets_failed,
+        )
 
     @staticmethod
     def _optional_positive_int(value, field_name):

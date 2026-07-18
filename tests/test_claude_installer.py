@@ -7,8 +7,13 @@ from pathlib import Path
 import shutil
 import tempfile
 import threading
+import time
 import unittest
 from unittest import mock
+
+from PySide6.QtCore import QTimer
+
+from tests.qt_test_utils import wait_until
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +50,35 @@ class ClaudeInstallerTests(unittest.TestCase):
         sources = importlib.import_module("backend.claude_install_sources")
         installer = importlib.import_module("backend.claude_installer")
         return sources, installer
+
+    def test_install_source_read_does_not_block_gui_thread(self):
+        _, installer = self.load_modules()
+        backend = installer.ClaudeInstaller()
+        main_thread = threading.get_ident()
+        worker_threads = []
+        timer_fired = []
+
+        def slow_source(product):
+            worker_threads.append(threading.get_ident())
+            time.sleep(0.2)
+            raise RuntimeError("停止后续下载")
+
+        with mock.patch.object(
+            installer,
+            "official_install_spec",
+            side_effect=slow_source,
+        ):
+            QTimer.singleShot(10, lambda: timer_fired.append(True))
+            started = time.perf_counter()
+            backend.install("claude-code")
+            call_elapsed = time.perf_counter() - started
+            wait_until(lambda: bool(timer_fired), timeout=0.15)
+            self.assertTrue(backend.busy)
+            self.assertLess(call_elapsed, 0.1)
+            wait_until(lambda: not backend.busy)
+
+        self.assertEqual(len(worker_threads), 1)
+        self.assertNotEqual(worker_threads[0], main_thread)
 
     def test_linux_package_resolution_selects_latest_and_preserves_hash(self):
         sources, _ = self.load_modules()

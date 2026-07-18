@@ -2,12 +2,15 @@ import importlib
 import json
 import sys
 import tempfile
+import time
 import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.qt_test_utils import wait_for_idle
+from PySide6.QtCore import QTimer
+
+from tests.qt_test_utils import wait_for_idle, wait_until
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +22,61 @@ class CodexConfigAuthTests(unittest.TestCase):
     def load_module(self):
         sys.modules.pop("backend.codex_config", None)
         return importlib.import_module("backend.codex_config")
+
+    def test_config_exists_is_cached_from_background_snapshot(self):
+        codex_config = self.load_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_home = Path(tmp) / ".codex"
+            codex_home.mkdir()
+            codex_config._codex_home = lambda: str(codex_home)
+            codex_config._app_dir = lambda: str(ROOT)
+            config = codex_config.CodexConfig()
+            wait_for_idle(config)
+
+            with patch.object(
+                codex_config.os.path,
+                "isfile",
+                side_effect=AssertionError("GUI 属性不应访问文件系统"),
+            ):
+                self.assertFalse(config.configExists)
+
+            config.applyConfig(
+                {
+                    "baseUrl": "https://gateway.example.com",
+                    "provider": "relay",
+                    "wireApi": "responses",
+                    "model": "gpt-5.6-sol",
+                }
+            )
+            wait_for_idle(config)
+            self.assertTrue(config.configExists)
+
+    def test_slow_presets_read_does_not_block_gui_thread(self):
+        codex_config = self.load_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_home = Path(tmp) / ".codex"
+            codex_home.mkdir()
+            codex_config._codex_home = lambda: str(codex_home)
+            codex_config._app_dir = lambda: str(ROOT)
+            config = codex_config.CodexConfig()
+            wait_for_idle(config)
+            timer_fired = []
+
+            def slow_read():
+                time.sleep(0.2)
+                return []
+
+            with patch.object(config, "_read_presets", side_effect=slow_read):
+                QTimer.singleShot(10, lambda: timer_fired.append(True))
+                started = time.perf_counter()
+                config.reloadPresets()
+                call_elapsed = time.perf_counter() - started
+                wait_until(lambda: bool(timer_fired), timeout=0.15)
+                self.assertTrue(config.operationBusy)
+                self.assertLess(call_elapsed, 0.1)
+                wait_for_idle(config)
 
     def test_set_key_moves_old_auth_to_backup_and_writes_clean_auth(self):
         codex_config = self.load_module()
@@ -328,6 +386,40 @@ class CodexConfigAuthTests(unittest.TestCase):
                 mocked.call_args.args[0].full_url,
                 "https://api.9li.life/v1/models",
             )
+
+    def test_slow_config_write_does_not_block_gui_thread(self):
+        codex_config = self.load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_home = Path(tmp) / ".codex"
+            codex_home.mkdir()
+            codex_config._codex_home = lambda: str(codex_home)
+            codex_config._app_dir = lambda: str(ROOT)
+            config = codex_config.CodexConfig()
+            wait_for_idle(config)
+            timer_fired = []
+
+            def slow_apply(values):
+                time.sleep(0.2)
+                snapshot = config._store.read_snapshot()
+                snapshot["baseUrl"] = values["baseUrl"]
+                return snapshot
+
+            with patch.object(config._store, "apply_config", side_effect=slow_apply):
+                QTimer.singleShot(10, lambda: timer_fired.append(True))
+                started = time.perf_counter()
+                config.applyConfig(
+                    {
+                        "baseUrl": "https://gateway.example.com",
+                        "provider": "relay",
+                        "wireApi": "responses",
+                        "model": "gpt-5.6-sol",
+                    }
+                )
+                call_elapsed = time.perf_counter() - started
+                wait_until(lambda: bool(timer_fired), timeout=0.15)
+                self.assertTrue(config.operationBusy)
+                self.assertLess(call_elapsed, 0.1)
+                wait_for_idle(config)
 
 
 if __name__ == "__main__":

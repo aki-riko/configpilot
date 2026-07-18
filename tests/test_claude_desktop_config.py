@@ -2,10 +2,13 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest import mock
 
-from tests.qt_test_utils import wait_for_idle
+from PySide6.QtCore import QTimer
+
+from tests.qt_test_utils import wait_for_idle, wait_until
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -97,6 +100,30 @@ class ClaudeDesktopConfigTests(unittest.TestCase):
             self.assertEqual(config.headerCount, 1)
             self.assertEqual(config.profileName, "Gateway")
             self.assertNotIn("secret-value", vars(config).values())
+
+    def test_slow_install_detection_does_not_block_gui_thread(self):
+        module = self.load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            config, _, _ = self.make_config(module, Path(tmp))
+            timer_fired = []
+
+            def slow_detection(target):
+                time.sleep(0.2)
+                return True
+
+            with mock.patch.object(
+                module,
+                "claude_desktop_installed",
+                side_effect=slow_detection,
+            ):
+                QTimer.singleShot(10, lambda: timer_fired.append(True))
+                started = time.perf_counter()
+                config.reload()
+                call_elapsed = time.perf_counter() - started
+                wait_until(lambda: bool(timer_fired), timeout=0.15)
+                self.assertTrue(config.operationBusy)
+                self.assertLess(call_elapsed, 0.1)
+                wait_for_idle(config)
 
     def test_apply_creates_profile_enables_developer_mode_and_preserves_settings(self):
         module = self.load_module()

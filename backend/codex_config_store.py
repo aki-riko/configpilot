@@ -38,6 +38,7 @@ class CodexConfigStore:
 
     def read_snapshot(self) -> dict:
         snapshot = {
+            "configExists": False,
             "provider": "",
             "baseUrl": "",
             "wireApi": "",
@@ -51,7 +52,9 @@ class CodexConfigStore:
             "toolOutputTokenLimit": "",
             "modelCatalogJson": "",
         }
-        if tomllib and os.path.isfile(self.config_path):
+        config_exists = os.path.isfile(self.config_path)
+        snapshot["configExists"] = config_exists
+        if tomllib and config_exists:
             with open(self.config_path, "rb") as handle:
                 data = tomllib.load(handle)
             provider = str(data.get("model_provider", ""))

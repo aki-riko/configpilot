@@ -34,6 +34,7 @@ from backend.claude_install_validation import (
 
 LOGGER = logging.getLogger(__name__)
 TEMP_DIR_PREFIX = "configpilot-claude-install-"
+SUPPORTED_INSTALL_PRODUCTS = frozenset({"claude-code", "claude-desktop"})
 
 
 class InstallCancelled(Exception):
@@ -264,21 +265,19 @@ class ClaudeInstaller(QObject):
         if self._busy:
             self.notify.emit(2, "安装任务进行中", "请等待当前 Claude 安装任务完成。")
             return
-        try:
-            spec = official_install_spec(product)
-        except ValueError as exc:
-            self.notify.emit(2, "无法开始安装", str(exc))
+        if product not in SUPPORTED_INSTALL_PRODUCTS:
+            self.notify.emit(2, "无法开始安装", "未知的 Claude 安装项")
             return
         self._cancel_event = threading.Event()
         self._set_state(
             busy=True,
             cancelable=True,
             progress=-1,
-            status=f"正在准备 {spec.display_name}",
+            status="正在准备 Claude 安装",
         )
         self._thread = threading.Thread(
             target=self._download_worker,
-            args=(spec, self._cancel_event),
+            args=(product, self._cancel_event),
             daemon=True,
             name="ConfigPilotClaudeInstaller",
         )
@@ -293,9 +292,11 @@ class ClaudeInstaller(QObject):
         self._status = "正在取消下载"
         self.changed.emit()
 
-    def _download_worker(self, spec: InstallSpec, cancel_event: threading.Event):
+    def _download_worker(self, product: str, cancel_event: threading.Event):
         path: Path | None = None
         try:
+            spec = official_install_spec(product)
+            self._workerProgress.emit(-1, f"正在准备 {spec.display_name}")
             resolved = self._resolve_spec(spec, cancel_event)
             path = _download_to_temp(
                 resolved,
