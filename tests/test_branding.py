@@ -165,6 +165,7 @@ class BrandingTests(unittest.TestCase):
             self.assertIn("GridLayout", section)
             self.assertIn("columns: width <", section)
 
+        self.assertIn("未包含 /v1 时自动补全", connection)
         self.assertIn("feature: Fluent.Enums.button.feature_dropdown", context)
         self.assertIn("Fluent.Expander", advanced)
 

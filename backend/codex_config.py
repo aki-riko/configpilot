@@ -19,6 +19,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 from PySide6.QtCore import QObject, Signal, Slot, Property
 
+from backend.endpoint_urls import append_api_path, normalize_v1_base_url
 from backend.model_profiles import ModelProfiles
 
 LOGGER = logging.getLogger(__name__)
@@ -383,10 +384,11 @@ class CodexConfig(QObject):
         cfg 字段: baseUrl(必填), provider, wireApi, model,
                  requiresAuth(bool), reasoningEffort(str), disableStorage(bool)
         """
-        base_url = str(cfg.get("baseUrl", "")).strip()
-        if not base_url:
+        raw_base_url = str(cfg.get("baseUrl", "")).strip()
+        if not raw_base_url:
             self.notify.emit(2, "未应用", "base_url 不能为空")
             return
+        base_url = normalize_v1_base_url(raw_base_url)
         provider = (str(cfg.get("provider", "")) or "relay").strip()
         wire_api = str(cfg.get("wireApi", "")).strip()
         model = str(cfg.get("model", "")).strip()
@@ -498,7 +500,7 @@ class CodexConfig(QObject):
         """请求 {base_url}/models 拉取模型列表。网络在后台线程跑,完成后信号回主线程。
         key 优先用传入的 key_override(输入框现填的), 否则读 auth.json。
         """
-        base_url = (base_url or "").strip().rstrip("/")
+        base_url = normalize_v1_base_url(base_url)
         if not base_url:
             self.notify.emit(2, "无法获取", "请先填写 base_url")
             return
@@ -518,7 +520,7 @@ class CodexConfig(QObject):
         """后台线程: 同步请求 /models。结果只经信号(自动排队回主线程)回传。"""
         import urllib.request
         import urllib.error
-        url = base_url + "/models"
+        url = append_api_path(base_url, "models")
         try:
             headers = {"Accept": "application/json"}
             if key:

@@ -261,6 +261,48 @@ class CodexConfigAuthTests(unittest.TestCase):
                 (1, "获取到 11 个模型", "可在模型下拉列表中选择"),
             )
 
+    def test_real_relay_host_gets_v1_for_config_and_model_fetch(self):
+        codex_config = self.load_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_home = Path(tmp) / ".codex"
+            codex_home.mkdir()
+            codex_config._codex_home = lambda: str(codex_home)
+            codex_config._app_dir = lambda: str(ROOT)
+            config = codex_config.CodexConfig()
+
+            config.applyConfig(
+                {
+                    "baseUrl": "https://api.9li.life",
+                    "provider": "relay",
+                    "wireApi": "responses",
+                    "model": "gpt-5.6-sol",
+                }
+            )
+            with (codex_home / "config.toml").open("rb") as handle:
+                saved = codex_config.tomllib.load(handle)
+            self.assertEqual(
+                saved["model_providers"]["relay"]["base_url"],
+                "https://api.9li.life/v1",
+            )
+
+            class Response:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, traceback):
+                    return False
+
+                def read(self):
+                    return b'{"data":[{"id":"gpt-5.6-sol"}]}'
+
+            with patch("urllib.request.urlopen", return_value=Response()) as mocked:
+                config._fetch_models_worker("https://api.9li.life", "")
+            self.assertEqual(
+                mocked.call_args.args[0].full_url,
+                "https://api.9li.life/v1/models",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

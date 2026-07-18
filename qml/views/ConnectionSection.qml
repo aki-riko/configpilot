@@ -77,7 +77,7 @@ Fluent.Card {
                 font.family: Fluent.Enums.fontFamily
             }
             Text {
-                text: "base_url"
+                text: "base_url · 未包含 /v1 时自动补全"
                 color: Fluent.Enums.textColor.tertiary
                 font.pixelSize: Fluent.Enums.typography.caption
                 font.family: Fluent.Enums.fontFamily

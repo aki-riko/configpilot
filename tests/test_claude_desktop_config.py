@@ -112,7 +112,7 @@ class ClaudeDesktopConfigTests(unittest.TestCase):
             config.notify.connect(lambda level, title, message: notices.append((level, title, message)))
             config.applyConfig(
                 {
-                    "endpoint": "https://gateway.example.com/v1",
+                    "endpoint": "https://api.9li.life",
                     "authScheme": "bearer",
                     "modelsText": "model-a\nmodel-b\nmodel-a",
                     "apiKey": "new-secret",
@@ -134,7 +134,7 @@ class ClaudeDesktopConfigTests(unittest.TestCase):
             self.assertEqual(profile["inferenceProvider"], "gateway")
             self.assertEqual(profile["inferenceCredentialKind"], "static")
             self.assertEqual(
-                profile["inferenceGatewayBaseUrl"], "https://gateway.example.com/v1"
+                profile["inferenceGatewayBaseUrl"], "https://api.9li.life/v1"
             )
             self.assertEqual(profile["inferenceGatewayAuthScheme"], "bearer")
             self.assertEqual(profile["inferenceGatewayApiKey"], "new-secret")

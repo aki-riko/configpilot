@@ -20,6 +20,7 @@ from backend.claude_install_sources import (
     claude_install_target,
 )
 from backend.claude_installer import ClaudeInstaller
+from backend.endpoint_urls import normalize_v1_base_url
 
 
 LOGGER = logging.getLogger(__name__)
@@ -156,7 +157,7 @@ def _validate_endpoint(value: str) -> str:
     parsed = urlparse(endpoint)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("Gateway endpoint 必须是完整的 http(s) URL")
-    return endpoint
+    return normalize_v1_base_url(endpoint)
 
 
 class ClaudeDesktopConfig(QObject):
