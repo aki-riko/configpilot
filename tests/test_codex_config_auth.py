@@ -2,10 +2,12 @@ import importlib
 import json
 import sys
 import tempfile
-import types
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+from tests.qt_test_utils import wait_for_idle
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,50 +15,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-class DummySignal:
-    def __init__(self, *args, **kwargs):
-        self.emissions = []
-
-    def emit(self, *args):
-        self.emissions.append(args)
-
-
-class DummyQObject:
-    def __init__(self, parent=None):
-        pass
-
-
-def dummy_slot(*args, **kwargs):
-    def decorate(func):
-        return func
-
-    return decorate
-
-
-def dummy_property(*args, **kwargs):
-    def decorate(func):
-        return property(func)
-
-    return decorate
-
-
-def install_pyside_stub():
-    qtcore = types.ModuleType("PySide6.QtCore")
-    qtcore.QObject = DummyQObject
-    qtcore.Signal = DummySignal
-    qtcore.Slot = dummy_slot
-    qtcore.Property = dummy_property
-
-    pyside = types.ModuleType("PySide6")
-    pyside.QtCore = qtcore
-
-    sys.modules["PySide6"] = pyside
-    sys.modules["PySide6.QtCore"] = qtcore
-
-
 class CodexConfigAuthTests(unittest.TestCase):
     def load_module(self):
-        install_pyside_stub()
         sys.modules.pop("backend.codex_config", None)
         return importlib.import_module("backend.codex_config")
 
@@ -84,7 +44,9 @@ class CodexConfigAuthTests(unittest.TestCase):
             )
 
             config = codex_config.CodexConfig()
+            wait_for_idle(config)
             config.setKey("new-key")
+            wait_for_idle(config)
 
             new_auth = json.loads(auth_path.read_text(encoding="utf-8"))
             backup_auth = json.loads((codex_home / "auth.json.bak").read_text(encoding="utf-8"))
@@ -109,6 +71,7 @@ class CodexConfigAuthTests(unittest.TestCase):
             codex_config._codex_home = lambda: str(codex_home)
             codex_config._app_dir = lambda: str(ROOT)
             config = codex_config.CodexConfig()
+            wait_for_idle(config)
 
             expected_values = ["low", "medium", "high", "xhigh"]
             expected_text = ["轻度", "中", "高", "极高"]
@@ -188,8 +151,11 @@ class CodexConfigAuthTests(unittest.TestCase):
             codex_config._codex_home = lambda: str(codex_home)
             codex_config._app_dir = lambda: str(ROOT)
             config = codex_config.CodexConfig()
-
-            config.notify.emissions.clear()
+            wait_for_idle(config)
+            notices = []
+            config.notify.connect(
+                lambda level, title, message: notices.append((level, title, message))
+            )
             config.applyConfig(
                 {
                     "baseUrl": "https://api.9li.life/v1",
@@ -200,11 +166,11 @@ class CodexConfigAuthTests(unittest.TestCase):
                 }
             )
             self.assertEqual(
-                config.notify.emissions[-1],
+                notices[-1],
                 (2, "参数无效", "gpt-5.6-sol 不支持思考等级 max"),
             )
             with config_path.open("rb") as handle:
-                rejected = codex_config.tomllib.load(handle)
+                rejected = tomllib.load(handle)
             self.assertNotIn("model", rejected)
             self.assertNotIn("model_reasoning_effort", rejected)
 
@@ -220,9 +186,10 @@ class CodexConfigAuthTests(unittest.TestCase):
                     "toolOutputTokenLimit": "6000",
                 }
             )
+            wait_for_idle(config)
 
             with config_path.open("rb") as handle:
-                saved = codex_config.tomllib.load(handle)
+                saved = tomllib.load(handle)
             self.assertEqual(saved["model"], "gpt-5.6-sol")
             self.assertEqual(saved["model_reasoning_effort"], "xhigh")
             self.assertEqual(saved["model_context_window"], 258400)
@@ -239,7 +206,11 @@ class CodexConfigAuthTests(unittest.TestCase):
             codex_config._codex_home = lambda: str(codex_home)
             codex_config._app_dir = lambda: str(ROOT)
             config = codex_config.CodexConfig()
-            config.notify.emissions.clear()
+            wait_for_idle(config)
+            notices = []
+            config.notify.connect(
+                lambda level, title, message: notices.append((level, title, message))
+            )
 
             model_ids = [
                 "codex-auto-review",
@@ -289,11 +260,12 @@ class CodexConfigAuthTests(unittest.TestCase):
                     ).encode("utf-8")
 
             with patch("urllib.request.urlopen", return_value=Response()):
-                config._fetch_models_worker("https://example.test/v1", "")
+                config.fetchModels("https://example.test/v1", "")
+                wait_for_idle(config, "modelsLoading")
 
             self.assertEqual(config.availableModels, model_ids)
             self.assertEqual(
-                config.notify.emissions[-1],
+                notices[-1],
                 (1, "获取到 11 个模型", "思考等级已从远端同步"),
             )
             self.assertEqual(
@@ -315,6 +287,7 @@ class CodexConfigAuthTests(unittest.TestCase):
             codex_config._codex_home = lambda: str(codex_home)
             codex_config._app_dir = lambda: str(ROOT)
             config = codex_config.CodexConfig()
+            wait_for_idle(config)
 
             config.applyConfig(
                 {
@@ -324,8 +297,9 @@ class CodexConfigAuthTests(unittest.TestCase):
                     "model": "gpt-5.6-sol",
                 }
             )
+            wait_for_idle(config)
             with (codex_home / "config.toml").open("rb") as handle:
-                saved = codex_config.tomllib.load(handle)
+                saved = tomllib.load(handle)
             self.assertEqual(
                 saved["model_providers"]["relay"]["base_url"],
                 "https://api.9li.life/v1",
@@ -348,7 +322,8 @@ class CodexConfigAuthTests(unittest.TestCase):
                     return_value=[],
                 ),
             ):
-                config._fetch_models_worker("https://api.9li.life", "")
+                config.fetchModels("https://api.9li.life", "")
+                wait_for_idle(config, "modelsLoading")
             self.assertEqual(
                 mocked.call_args.args[0].full_url,
                 "https://api.9li.life/v1/models",

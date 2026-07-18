@@ -9,17 +9,11 @@ key 写入 auth.json。
 import json
 import logging
 import os
-import re
-import shutil
-import threading
-
-try:
-    import tomllib  # py3.11+
-except ModuleNotFoundError:  # pragma: no cover
-    tomllib = None
 
 from PySide6.QtCore import QObject, Signal, Slot, Property
 
+from backend.async_tasks import SerialTaskRunner
+from backend.codex_config_store import CodexConfigStore, KEEP
 from backend.codex_model_catalog import fetch_codex_model_catalog
 from backend.endpoint_urls import append_api_path, normalize_v1_base_url
 from backend.model_profiles import ModelProfiles
@@ -28,10 +22,6 @@ LOGGER = logging.getLogger(__name__)
 
 DEFAULT_WIRE_API = "responses"
 DEFAULT_MODEL = "gpt-5.5"
-LEGACY_MANAGED_CONTEXT_CATALOG = "gpt-5.5-1m.json"
-_KEEP = object()
-
-
 def _codex_home() -> str:
     return os.path.join(os.path.expanduser("~"), ".codex")
 
@@ -46,13 +36,16 @@ class CodexConfig(QObject):
     providersChanged = Signal()             # 预置中转列表变化
     modelsChanged = Signal()                # 获取到的模型列表变化
     reasoningProfilesChanged = Signal()     # 远端模型目录中的思考等级变化
+    operationBusyChanged = Signal()
+    modelsLoadingChanged = Signal()
     notify = Signal(int, str, str)          # (level 0~3, 标题, 内容) -> QML 弹 InfoBar
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._home = _codex_home()
-        self._config_path = os.path.join(self._home, "config.toml")
-        self._auth_path = os.path.join(self._home, "auth.json")
+        self._store = CodexConfigStore(self._home)
+        self._config_path = self._store.config_path
+        self._auth_path = self._store.auth_path
         self._providers_path = os.path.join(_app_dir(), "providers.json")
         self._model_profiles_path = os.path.join(_app_dir(), "model_profiles.json")
         self._model_profiles = ModelProfiles.from_file(self._model_profiles_path)
@@ -69,7 +62,17 @@ class CodexConfig(QObject):
         self._tool_output_token_limit = ""
         self._model_catalog_json = ""
         self._available_models = []
-        self._reasoning_refresh_lock = threading.Lock()
+        self._models_loading = False
+        self._reasoning_refresh_pending = False
+        self._config_tasks = SerialTaskRunner(
+            self,
+            thread_name="ConfigPilotCodexConfig",
+        )
+        self._network_tasks = SerialTaskRunner(
+            self,
+            thread_name="ConfigPilotCodexNetwork",
+        )
+        self._config_tasks.busyChanged.connect(self.operationBusyChanged.emit)
         self._presets = []
         self._load_presets()
         self.reload()
@@ -161,126 +164,60 @@ class CodexConfig(QObject):
     def configExists(self):
         return os.path.isfile(self._config_path)
 
+    @Property(bool, notify=operationBusyChanged)
+    def operationBusy(self):
+        return self._config_tasks.busy
+
+    @Property(bool, notify=modelsLoadingChanged)
+    def modelsLoading(self):
+        return self._models_loading
+
+    def _set_models_loading(self, value):
+        value = bool(value)
+        if self._models_loading == value:
+            return
+        self._models_loading = value
+        self.modelsLoadingChanged.emit()
+
     #__SLOTS__
     # ---------- 读 ----------
     @Slot()
-    def reload(self):
-        """用 tomllib 解析 config.toml 拿当前生效值;auth.json 判断是否有 key。"""
-        self._provider = self._base_url = self._wire_api = self._model = ""
-        self._has_key = False
-        self._requires_auth = False
-        self._reasoning_effort = ""
-        self._disable_storage = False
-        self._model_context_window = ""
-        self._model_auto_compact_token_limit = ""
-        self._tool_output_token_limit = ""
-        self._model_catalog_json = ""
-        if tomllib and os.path.isfile(self._config_path):
-            try:
-                with open(self._config_path, "rb") as f:
-                    data = tomllib.load(f)
-                self._provider = str(data.get("model_provider", ""))
-                self._model = str(data.get("model", ""))
-                self._reasoning_effort = str(data.get("model_reasoning_effort", ""))
-                self._disable_storage = bool(data.get("disable_response_storage", False))
-                self._model_context_window = self._number_to_text(data.get("model_context_window"))
-                self._model_auto_compact_token_limit = self._number_to_text(data.get("model_auto_compact_token_limit"))
-                self._tool_output_token_limit = self._number_to_text(data.get("tool_output_token_limit"))
-                self._model_catalog_json = str(data.get("model_catalog_json", ""))
-                prov = data.get("model_providers", {}).get(self._provider, {})
-                self._base_url = str(prov.get("base_url", ""))
-                self._wire_api = str(prov.get("wire_api", ""))
-                self._requires_auth = bool(prov.get("requires_openai_auth", False))
-            except Exception as e:
-                self.notify.emit(3, "读取失败", f"config.toml 解析出错: {e}")
-        if os.path.isfile(self._auth_path):
-            try:
-                with open(self._auth_path, "r", encoding="utf-8") as f:
-                    auth = json.load(f)
-                self._has_key = bool(auth.get("OPENAI_API_KEY"))
-            except Exception as exc:
-                self._has_key = False
-                self.notify.emit(2, "认证读取失败", f"auth.json: {exc}")
+    def _apply_snapshot(self, snapshot):
+        self._provider = str(snapshot["provider"])
+        self._base_url = str(snapshot["baseUrl"])
+        self._wire_api = str(snapshot["wireApi"])
+        self._model = str(snapshot["model"])
+        self._has_key = bool(snapshot["hasKey"])
+        self._requires_auth = bool(snapshot["requiresAuth"])
+        self._reasoning_effort = str(snapshot["reasoningEffort"])
+        self._disable_storage = bool(snapshot["disableStorage"])
+        self._model_context_window = str(snapshot["modelContextWindow"])
+        self._model_auto_compact_token_limit = str(
+            snapshot["modelAutoCompactTokenLimit"]
+        )
+        self._tool_output_token_limit = str(snapshot["toolOutputTokenLimit"])
+        self._model_catalog_json = str(snapshot["modelCatalogJson"])
         self.changed.emit()
+
+    def _config_read_failed(self, exc):
+        LOGGER.exception(
+            "读取 Codex 配置失败",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+        self.notify.emit(3, "读取失败", str(exc))
+
+    @Slot()
+    def reload(self):
+        self._config_tasks.submit(
+            self._store.read_snapshot,
+            self._apply_snapshot,
+            self._config_read_failed,
+        )
 
     @Slot()
     def reloadPresets(self):
         self._load_presets()
         self.providersChanged.emit()
-
-    # ---------- 写 config.toml(正则定点, 保留其它内容) ----------
-    @staticmethod
-    def _set_top_scalar(text, key, value, is_str=True):
-        """设置/删除顶层标量字段。value 为 None 时删除该字段。"""
-        if value is None:
-            return re.sub(rf'(?m)^\s*{re.escape(key)}\s*=.*\n?', '', text, count=1)
-        rhs = f'"{value}"' if is_str else ("true" if value else "false")
-        if re.search(rf'(?m)^\s*{re.escape(key)}\s*=', text):
-            return re.sub(rf'(?m)^(\s*{re.escape(key)}\s*=\s*).*$',
-                          rf'\g<1>{rhs}', text, count=1)
-        return f'{key} = {rhs}\n' + text
-
-    @staticmethod
-    def _set_top_integer(text, key, value):
-        if value is None:
-            return re.sub(rf'(?m)^\s*{re.escape(key)}\s*=.*\n?', '', text, count=1)
-        rhs = str(int(value))
-        if re.search(rf'(?m)^\s*{re.escape(key)}\s*=', text):
-            return re.sub(rf'(?m)^(\s*{re.escape(key)}\s*=\s*).*$',
-                          rf'\g<1>{rhs}', text, count=1)
-        return f'{key} = {rhs}\n' + text
-
-    @staticmethod
-    def _set_top_toml_string(text, key, value):
-        if value is None:
-            return re.sub(rf'(?m)^\s*{re.escape(key)}\s*=.*\n?', '', text, count=1)
-        rhs = json.dumps(str(value), ensure_ascii=False)
-        if re.search(rf'(?m)^\s*{re.escape(key)}\s*=', text):
-            return re.sub(rf'(?m)^(\s*{re.escape(key)}\s*=\s*).*$',
-                          lambda m: m.group(1) + rhs, text, count=1)
-        return f'{key} = {rhs}\n' + text
-
-    @staticmethod
-    def _get_top_toml_string(text, key):
-        m = re.search(rf'(?m)^\s*{re.escape(key)}\s*=\s*(.+?)\s*(?:#.*)?$', text)
-        if not m:
-            return ""
-        raw = m.group(1).strip()
-        if tomllib:
-            try:
-                return str(tomllib.loads(f"value = {raw}\n").get("value", ""))
-            except Exception as exc:
-                LOGGER.debug("无法按 TOML 解析 %s，回退为裸字符串: %s", key, exc)
-        return raw.strip("\"'")
-
-    def _managed_model_catalog_path(self):
-        return os.path.join(self._home, "model-catalogs", LEGACY_MANAGED_CONTEXT_CATALOG)
-
-    def _set_managed_model_catalog_json(self, text, value):
-        if value:
-            return self._set_top_toml_string(text, "model_catalog_json", value)
-
-        existing = self._get_top_toml_string(text, "model_catalog_json")
-        if not existing:
-            return text
-        try:
-            same = os.path.normcase(os.path.abspath(existing)) == os.path.normcase(
-                os.path.abspath(self._managed_model_catalog_path())
-            )
-        except Exception as exc:
-            LOGGER.warning("比较旧模型目录路径失败: %s", exc)
-            same = False
-        return self._set_top_toml_string(text, "model_catalog_json", None) if same else text
-
-    @staticmethod
-    def _number_to_text(value):
-        if value is None:
-            return ""
-        try:
-            return str(int(value))
-        except Exception as exc:
-            LOGGER.debug("数值转文本失败，保留原值 %r: %s", value, exc)
-            return str(value)
 
     @staticmethod
     def _optional_positive_int(value, field_name):
@@ -315,89 +252,34 @@ class CodexConfig(QObject):
 
     @Slot()
     def refreshReasoningProfiles(self):
-        threading.Thread(
-            target=self._refresh_reasoning_profiles_worker, daemon=True
-        ).start()
+        if self._reasoning_refresh_pending:
+            return
+        self._reasoning_refresh_pending = True
+        self._network_tasks.submit(
+            fetch_codex_model_catalog,
+            self._apply_reasoning_catalog,
+            self._reasoning_catalog_failed,
+        )
 
-    def _refresh_reasoning_profiles_worker(self):
-        if not self._reasoning_refresh_lock.acquire(blocking=False):
-            return 0
-        try:
-            models = fetch_codex_model_catalog()
-            updated = self._model_profiles.update_reasoning_from_models(models)
-            if updated:
-                self.reasoningProfilesChanged.emit()
-            return updated
-        except Exception as exc:
-            LOGGER.info("无法从 Codex 远端模型目录更新思考等级: %s", exc)
-            return 0
-        finally:
-            self._reasoning_refresh_lock.release()
+    def _apply_reasoning_catalog(self, models):
+        self._reasoning_refresh_pending = False
+        if self._model_profiles.update_reasoning_from_models(models):
+            self.reasoningProfilesChanged.emit()
 
-    @staticmethod
-    def _set_block_scalar(block, key, value, is_str=True):
-        """设置/删除 provider 块内标量字段。value 为 None 时删除。"""
-        if value is None:
-            return re.sub(rf'(?m)^\s*{re.escape(key)}\s*=.*\n?', '', block, count=1)
-        rhs = f'"{value}"' if is_str else ("true" if value else "false")
-        if re.search(rf'(?m)^\s*{re.escape(key)}\s*=', block):
-            return re.sub(rf'(?m)^(\s*{re.escape(key)}\s*=\s*).*$',
-                          rf'\g<1>{rhs}', block, count=1)
-        return block.rstrip() + f'\n{key} = {rhs}\n'
+    def _reasoning_catalog_failed(self, exc):
+        self._reasoning_refresh_pending = False
+        LOGGER.info("无法从 Codex 远端模型目录更新思考等级: %s", exc)
 
-    def _write_provider_block(self, text, provider, base_url, wire_api, model,
-                              requires_auth=None, reasoning_effort=None,
-                              disable_storage=None, context_window=_KEEP,
-                              auto_compact_limit=_KEEP, tool_output_limit=_KEEP,
-                              model_catalog_json=_KEEP):
-        provider = provider or "relay"
-        # 1. 顶层 model_provider
-        if re.search(r'(?m)^\s*model_provider\s*=', text):
-            text = re.sub(r'(?m)^(\s*model_provider\s*=\s*")[^"]*(")',
-                          rf'\g<1>{provider}\g<2>', text, count=1)
-        else:
-            text = f'model_provider = "{provider}"\n' + text
-        # 2. 顶层 model
-        if model:
-            text = self._set_top_scalar(text, "model", model)
-        # 2b. 顶层高级标量(None 表示不动)
-        if reasoning_effort is not None:
-            text = self._set_top_scalar(text, "model_reasoning_effort",
-                                        reasoning_effort or None)
-        if disable_storage is not None:
-            text = self._set_top_scalar(text, "disable_response_storage",
-                                        disable_storage, is_str=False)
-        if context_window is not _KEEP:
-            text = self._set_top_integer(text, "model_context_window", context_window)
-        if auto_compact_limit is not _KEEP:
-            text = self._set_top_integer(text, "model_auto_compact_token_limit", auto_compact_limit)
-        if tool_output_limit is not _KEEP:
-            text = self._set_top_integer(text, "tool_output_token_limit", tool_output_limit)
-        if model_catalog_json is not _KEEP:
-            text = self._set_managed_model_catalog_json(text, model_catalog_json)
-        # 3. [model_providers.<provider>] 块
-        esc = re.escape(provider)
-        block_re = re.compile(rf'(?ms)^\s*\[model_providers\.{esc}\]\s*.*?(?=^\s*\[|\Z)')
-        m = block_re.search(text)
-        if m:
-            block = m.group(0)
-            block = self._set_block_scalar(block, "base_url", base_url)
-            if wire_api:
-                block = self._set_block_scalar(block, "wire_api", wire_api)
-            if requires_auth is not None:
-                block = self._set_block_scalar(block, "requires_openai_auth",
-                                               requires_auth, is_str=False)
-            text = text[:m.start()] + block + text[m.end():]
-        else:
-            block = (f'\n\n[model_providers.{provider}]\n'
-                     f'name = "{provider}"\n'
-                     f'base_url = "{base_url}"\n')
-            if wire_api:
-                block += f'wire_api = "{wire_api}"\n'
-            if requires_auth is not None:
-                block += f'requires_openai_auth = {"true" if requires_auth else "false"}\n'
-            text = text.rstrip() + block
-        return text
+    def _complete_config_change(self, snapshot, title, message):
+        self._apply_snapshot(snapshot)
+        self.notify.emit(1, title, message)
+
+    def _config_write_failed(self, exc):
+        LOGGER.exception(
+            "写入 Codex 配置失败",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+        self.notify.emit(3, "写入失败", str(exc))
 
     @Slot("QVariantMap")
     def applyConfig(self, cfg):
@@ -424,58 +306,57 @@ class CodexConfig(QObject):
             self.notify.emit(2, "参数无效", f"{model} 不支持思考等级 {eff}")
             return
         try:
-            context_window = (_KEEP if "modelContextWindow" not in cfg
+            context_window = (KEEP if "modelContextWindow" not in cfg
                               else self._optional_positive_int(
                                   cfg.get("modelContextWindow"), "model_context_window"))
-            auto_compact_limit = (_KEEP if "modelAutoCompactTokenLimit" not in cfg
+            auto_compact_limit = (KEEP if "modelAutoCompactTokenLimit" not in cfg
                                   else self._optional_positive_int(
                                       cfg.get("modelAutoCompactTokenLimit"),
                                       "model_auto_compact_token_limit"))
-            tool_output_limit = (_KEEP if "toolOutputTokenLimit" not in cfg
+            tool_output_limit = (KEEP if "toolOutputTokenLimit" not in cfg
                                  else self._optional_positive_int(
                                      cfg.get("toolOutputTokenLimit"),
                                      "tool_output_token_limit"))
         except ValueError as e:
             self.notify.emit(2, "参数无效", str(e))
             return
-        try:
-            model_catalog_json = _KEEP
-            if context_window is not _KEEP:
-                context_preset = self._model_profiles.context_preset(model)
-                if context_preset:
-                    context_window = self._model_profiles.clamp_context_window(
-                        model, context_window
+        model_catalog_json = KEEP
+        if context_window is not KEEP:
+            context_preset = self._model_profiles.context_preset(model)
+            if context_preset:
+                context_window = self._model_profiles.clamp_context_window(
+                    model, context_window
+                )
+                if auto_compact_limit is not KEEP:
+                    auto_compact_limit = self._model_profiles.clamp_auto_compact_limit(
+                        model, auto_compact_limit
                     )
-                    if auto_compact_limit is not _KEEP:
-                        auto_compact_limit = (
-                            self._model_profiles.clamp_auto_compact_limit(
-                                model, auto_compact_limit
-                            )
-                        )
-                    model_catalog_json = None
-                elif context_window is None:
-                    model_catalog_json = None
+                model_catalog_json = None
+            elif context_window is None:
+                model_catalog_json = None
 
-            text = ""
-            if os.path.isfile(self._config_path):
-                shutil.copy2(self._config_path, self._config_path + ".bak")
-                with open(self._config_path, "r", encoding="utf-8") as f:
-                    text = f.read()
-            else:
-                os.makedirs(self._home, exist_ok=True)
-            new_text = self._write_provider_block(
-                text, provider, base_url, wire_api, model,
-                requires_auth=req, reasoning_effort=eff, disable_storage=dis,
-                context_window=context_window,
-                auto_compact_limit=auto_compact_limit,
-                tool_output_limit=tool_output_limit,
-                model_catalog_json=model_catalog_json)
-            with open(self._config_path, "w", encoding="utf-8", newline="") as f:
-                f.write(new_text)
-            self.reload()
-            self.notify.emit(1, "已应用", f"已切到 {base_url},重启 Codex 生效")
-        except Exception as e:
-            self.notify.emit(3, "应用失败", str(e))
+        values = {
+            "baseUrl": base_url,
+            "provider": provider,
+            "wireApi": wire_api,
+            "model": model,
+            "requiresAuth": req,
+            "reasoningEffort": eff,
+            "disableStorage": dis,
+            "contextWindow": context_window,
+            "autoCompactLimit": auto_compact_limit,
+            "toolOutputLimit": tool_output_limit,
+            "modelCatalogJson": model_catalog_json,
+        }
+        self._config_tasks.submit(
+            lambda: self._store.apply_config(values),
+            lambda snapshot: self._complete_config_change(
+                snapshot,
+                "已应用",
+                f"已切到 {base_url},重启 Codex 生效",
+            ),
+            self._config_write_failed,
+        )
 
     @Slot()
     def resetDefault(self):
@@ -500,20 +381,15 @@ class CodexConfig(QObject):
         if not key:
             self.notify.emit(2, "未写入", "key 为空,已跳过")
             return
-        try:
-            auth = {
-                "OPENAI_API_KEY": key,
-                "auth_mode": "apikey",
-            }
-            os.makedirs(self._home, exist_ok=True)
-            if os.path.isfile(self._auth_path):
-                os.replace(self._auth_path, self._auth_path + ".bak")
-            with open(self._auth_path, "w", encoding="utf-8") as f:
-                json.dump(auth, f, ensure_ascii=False, indent=2)
-            self.reload()
-            self.notify.emit(1, "已写入", "API key 已保存到 auth.json")
-        except Exception as e:
-            self.notify.emit(3, "写入失败", str(e))
+        self._config_tasks.submit(
+            lambda: self._store.set_key(key),
+            lambda snapshot: self._complete_config_change(
+                snapshot,
+                "已写入",
+                "API key 已保存到 auth.json",
+            ),
+            self._config_write_failed,
+        )
 
     # ---------- 获取模型列表(后台线程,不阻塞 UI) ----------
     @Slot(str, str)
@@ -525,52 +401,75 @@ class CodexConfig(QObject):
         if not base_url:
             self.notify.emit(2, "无法获取", "请先填写 base_url")
             return
+        if self._models_loading:
+            return
         key = (key_override or "").strip()
-        if not key and os.path.isfile(self._auth_path):
-            try:
-                with open(self._auth_path, "r", encoding="utf-8") as f:
-                    key = json.load(f).get("OPENAI_API_KEY", "")
-            except Exception as exc:
-                key = ""
-                self.notify.emit(2, "认证读取失败", f"auth.json: {exc}")
-        threading.Thread(target=self._fetch_models_worker,
-                         args=(base_url, key), daemon=True).start()
+        self._set_models_loading(True)
+        self._network_tasks.submit(
+            lambda: self._fetch_models_result(base_url, key),
+            self._apply_models_result,
+            self._models_fetch_failed,
+        )
 
-    def _fetch_models_worker(self, base_url, key):
-        """后台线程: 同步请求 /models。结果只经信号(自动排队回主线程)回传。"""
+    def _fetch_models_result(self, base_url, key_override):
         import urllib.request
-        import urllib.error
+
+        key = key_override or self._store.read_api_key()
         url = append_api_path(base_url, "models")
-        try:
-            headers = {"Accept": "application/json"}
-            if key:
-                headers["Authorization"] = f"Bearer {key}"
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-            data = payload.get("data", payload) if isinstance(payload, dict) else payload
-            ids = []
-            for it in (data or []):
-                mid = it.get("id") if isinstance(it, dict) else str(it)
-                if mid:
-                    ids.append(str(mid))
-            if not ids:
-                self.notify.emit(2, "无模型", "接口返回空列表")
-                return
-            updated = self._model_profiles.update_reasoning_from_models(data)
-            if not updated:
-                updated = self._refresh_reasoning_profiles_worker()
-            else:
-                self.reasoningProfilesChanged.emit()
-            self._available_models = ids
-            self.modelsChanged.emit()
-            self.notify.emit(
-                1,
-                f"获取到 {len(ids)} 个模型",
-                "思考等级已从远端同步" if updated
-                else "接口未提供思考等级，已使用内置回退",
+        headers = {"Accept": "application/json"}
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        data = payload.get("data", payload) if isinstance(payload, dict) else payload
+        ids = []
+        for item in data or []:
+            model_id = item.get("id") if isinstance(item, dict) else str(item)
+            if model_id:
+                ids.append(str(model_id))
+        catalog = []
+        has_reasoning = any(
+            isinstance(item, dict)
+            and isinstance(item.get("supported_reasoning_levels"), list)
+            for item in data or []
+        )
+        if ids and not has_reasoning:
+            try:
+                catalog = fetch_codex_model_catalog()
+            except Exception as exc:
+                LOGGER.info("Codex 远端模型目录回退失败: %s", exc)
+        return {"ids": ids, "models": data or [], "catalog": catalog}
+
+    def _apply_models_result(self, result):
+        self._set_models_loading(False)
+        ids = result["ids"]
+        if not ids:
+            self.notify.emit(2, "无模型", "接口返回空列表")
+            return
+        updated = self._model_profiles.update_reasoning_from_models(result["models"])
+        if not updated:
+            updated = self._model_profiles.update_reasoning_from_models(
+                result["catalog"]
             )
-        except urllib.error.HTTPError as e:
-            self.notify.emit(3, "获取失败", f"HTTP {e.code}: {e.reason}")
-        except Exception as e:
-            self.notify.emit(3, "获取失败", str(e))
+        if updated:
+            self.reasoningProfilesChanged.emit()
+        self._available_models = list(ids)
+        self.modelsChanged.emit()
+        self.notify.emit(
+            1,
+            f"获取到 {len(ids)} 个模型",
+            "思考等级已从远端同步"
+            if updated
+            else "接口未提供思考等级，已使用内置回退",
+        )
+
+    def _models_fetch_failed(self, exc):
+        import urllib.error
+
+        self._set_models_loading(False)
+        if isinstance(exc, urllib.error.HTTPError):
+            message = f"HTTP {exc.code}: {exc.reason}"
+        else:
+            message = str(exc)
+        self.notify.emit(3, "获取失败", message)

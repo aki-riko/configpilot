@@ -9,6 +9,7 @@ Fluent.Card {
     property string providerValue: ""
     property string wireApiValue: ""
     property bool hasKey: false
+    property bool configBusy: false
     readonly property string keyDraft: keyInput.text
 
     signal baseUrlEdited(string value)
@@ -228,6 +229,7 @@ Fluent.Card {
                     id: keyInput
                     Layout.fillWidth: true
                     inputType: Fluent.Enums.input.type_password
+                    enabled: !root.configBusy
                     placeholderText: "粘贴 API key"
                     onAccepted: {
                         if (text.trim().length > 0) {
@@ -240,7 +242,7 @@ Fluent.Card {
                     Layout.fillWidth: keyGrid.columns === 1
                     style: Fluent.Enums.button.style_default
                     text: "保存密钥"
-                    enabled: keyInput.text.trim().length > 0
+                    enabled: !root.configBusy && keyInput.text.trim().length > 0
                     onClicked: {
                         root.saveKeyRequested(keyInput.text)
                         keyInput.text = ""

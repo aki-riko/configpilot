@@ -19,6 +19,12 @@ Item {
     property string fAutoCompactLimit: ""
     property string fToolOutputLimit: ""
     property string committedModel: ""
+    readonly property bool configBusy: CodexConfig
+                                               ? CodexConfig.operationBusy
+                                               : false
+    readonly property bool modelsLoading: CodexConfig
+                                                ? CodexConfig.modelsLoading
+                                                : false
 
     readonly property int pagePadding: width < 720
                                        ? Fluent.Enums.spacing.l
@@ -246,6 +252,7 @@ Item {
                 providerValue: root.fProvider
                 wireApiValue: root.fWireApi
                 hasKey: CodexConfig ? CodexConfig.hasKey : false
+                configBusy: root.configBusy
                 onBaseUrlEdited: function(value) { root.fBaseUrl = value }
                 onProviderEdited: function(value) { root.fProvider = value }
                 onWireApiEdited: function(value) { root.fWireApi = value }
@@ -260,6 +267,7 @@ Item {
                 modelValue: root.fModel
                 reasoningValue: root.fReasoningEffort
                 availableModels: CodexConfig ? CodexConfig.availableModels : []
+                loading: root.modelsLoading
                 onModelTextEdited: function(value) { root.fModel = value }
                 onModelCommitted: function(value) { root.commitTypedModel(value) }
                 onModelSelected: function(value) { root.selectModel(value) }
@@ -350,13 +358,15 @@ Item {
             Fluent.Button {
                 style: Fluent.Enums.button.style_default
                 text: "重新读取"
+                enabled: !root.configBusy
                 onClicked: if (CodexConfig) CodexConfig.reload()
             }
 
             Fluent.Button {
                 style: Fluent.Enums.button.style_primary
-                text: "应用更改"
-                enabled: root.hasDraftChanges
+                text: root.configBusy ? "处理中..." : "应用更改"
+                enabled: !root.configBusy
+                         && root.hasDraftChanges
                          && root.fBaseUrl.trim().length > 0
                 onClicked: root.applyDraft()
             }

@@ -8,6 +8,7 @@ Fluent.Card {
     property string modelValue: ""
     property string reasoningValue: ""
     property var availableModels: []
+    property bool loading: false
 
     signal modelTextEdited(string value)
     signal modelCommitted(string value)
@@ -155,7 +156,8 @@ Fluent.Card {
                     Fluent.Button {
                         Layout.fillWidth: pickerGrid.columns === 1
                         style: Fluent.Enums.button.style_default
-                        text: "获取模型"
+                        text: root.loading ? "获取中..." : "获取模型"
+                        enabled: !root.loading
                         onClicked: root.fetchRequested()
                     }
                 }
