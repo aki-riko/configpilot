@@ -23,11 +23,20 @@ from prismqml import App
 
 def main() -> int:
     # App 自动完成 DPI / 消息处理器 / register_types / 异步孵化控制器
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    from backend.app_settings import load_app_settings
+
+    try:
+        app_settings = load_app_settings(os.path.join(app_dir, "app_config.json"))
+    except (OSError, ValueError) as exc:
+        print(f"[ERROR] 加载应用配置失败: {exc}", file=sys.stderr)
+        return -1
+
     app = App(sys.argv)
+    app.setApplicationVersion(app_settings.version)
     engine = app.engine
 
     # 在创建 QML Window 前设置应用级图标，避免 Windows 任务栏先缓存通用图标。
-    app_dir = os.path.dirname(os.path.abspath(__file__))
     taskbar_icon_path = os.path.join(
         app_dir,
         "resources",
@@ -66,11 +75,14 @@ def main() -> int:
 
     # 注册 AI 工具配置后端
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from backend.app_updater import AppUpdater
     from backend.codex_config import CodexConfig
     from backend.claude_desktop_config import ClaudeDesktopConfig
 
+    app_updater = AppUpdater(app_settings, prismqml.__version__, parent=app.qapp)
     codex = CodexConfig()
     claude_desktop = ClaudeDesktopConfig()
+    engine.rootContext().setContextProperty("AppUpdater", app_updater)
     engine.rootContext().setContextProperty("CodexConfig", codex)
     engine.rootContext().setContextProperty("ClaudeDesktopConfig", claude_desktop)
 

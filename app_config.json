@@ -1,0 +1,10 @@
+{
+  "version": "1.0.11",
+  "updates": {
+    "repository": "aki-riko/ConfigPilot",
+    "asset_keyword": "Setup",
+    "auto_check": true,
+    "startup_delay_ms": 1500,
+    "windows_installer_args": "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /AUTORESTARTAPP"
+  }
+}

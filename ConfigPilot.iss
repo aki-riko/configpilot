@@ -59,10 +59,31 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{a
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "立即启动 {#AppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Flags: nowait; Check: ShouldAutoRestartApplication
 
 [Code]
 var
   PreviousInstallDir: String;
+
+function HasCommandLineParam(const Expected: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+  begin
+    if CompareText(ParamStr(I), Expected) = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
+function ShouldAutoRestartApplication(): Boolean;
+begin
+  Result := WizardSilent and HasCommandLineParam('/AUTORESTARTAPP');
+end;
 
 function InitializeSetup(): Boolean;
 begin

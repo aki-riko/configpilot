@@ -68,10 +68,18 @@ Item {
                         font.family: Fluent.Enums.fontFamily
                     }
                     Text {
-                        text: "AI 工具配置与自动化中心\n基于 PrismQML (prismqml 0.2.24.9) · MIT"
+                        text: "AI 工具配置与自动化中心\nConfigPilot "
+                            + AppUpdater.version + "\n基于 PrismQML (prismqml "
+                            + AppUpdater.prismqmlVersion + ") · MIT"
                         font.pixelSize: Fluent.Enums.typography.body
                         color: Fluent.Enums.textColor.secondary
                         font.family: Fluent.Enums.fontFamily
+                    }
+                    Fluent.Button {
+                        style: Fluent.Enums.button.style_default
+                        text: AppUpdater.checking ? "正在检查..." : "检查更新"
+                        enabled: !AppUpdater.checking
+                        onClicked: AppUpdater.checkManually()
                     }
                 }
             }

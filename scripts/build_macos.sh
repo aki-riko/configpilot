@@ -30,6 +30,7 @@ mkdir -p build
   --include-data-dir="$FQ=prismqml" \
   --include-data-files=providers.json=providers.json \
   --include-data-files=model_profiles.json=model_profiles.json \
+  --include-data-files=app_config.json=app_config.json \
   --include-package=prismqml \
   --include-package=backend \
   --output-dir=build \

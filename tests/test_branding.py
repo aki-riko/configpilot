@@ -55,6 +55,10 @@ class BrandingTests(unittest.TestCase):
             "--include-data-files=model_profiles.json=model_profiles.json",
             windows_build,
         )
+        self.assertIn(
+            "--include-data-files=app_config.json=app_config.json",
+            windows_build,
+        )
 
         macos_build = self.read("scripts/build_macos.sh")
         self.assertIn('APP_NAME="ConfigPilot"', macos_build)
@@ -169,13 +173,15 @@ class BrandingTests(unittest.TestCase):
         about = self.read("qml/views/AboutView.qml")
         main = self.read("qml/main.qml")
 
-        self.assertIn("prismqml==0.2.24.9", requirements)
-        self.assertIn("prismqml 0.2.24.9", about)
+        self.assertIn("prismqml==0.2.24.13", requirements)
+        self.assertIn("AppUpdater.prismqmlVersion", about)
         self.assertIn("minimumWidth: 760", main)
         self.assertIn("minimumHeight: 560", main)
 
     def test_release_version_and_macos_disclosure_are_consistent(self):
         version = "1.0.11"
+        app_config = self.read("app_config.json")
+        self.assertIn(f'"version": "{version}"', app_config)
         self.assertIn(f'set "APP_VER={version}"', self.read("build_nuitka.cmd"))
         self.assertIn(f'#define AppVer "{version}"', self.read("ConfigPilot.iss"))
 
@@ -197,6 +203,23 @@ class BrandingTests(unittest.TestCase):
             'cp "docs/macos-first-open.txt" "$STAGING/首次打开说明.txt"',
             macos_build,
         )
+
+    def test_application_update_flow_uses_prismqml_engine(self):
+        main_py = self.read("main.py")
+        updater_py = self.read("backend/app_updater.py")
+        main_qml = self.read("qml/main.qml")
+        about_qml = self.read("qml/views/AboutView.qml")
+        installer = self.read("ConfigPilot.iss")
+
+        self.assertIn('setContextProperty("AppUpdater", app_updater)', main_py)
+        self.assertIn("parent=app.qapp", main_py)
+        self.assertIn("from prismqml import Updater", updater_py)
+        self.assertIn("AppUpdater.checkAutomatically()", main_qml)
+        self.assertIn("Fluent.UpdateDialog", main_qml)
+        self.assertIn("Fluent.ProgressDialog", main_qml)
+        self.assertIn("AppUpdater.downloadUpdate", main_qml)
+        self.assertIn("AppUpdater.checkManually()", about_qml)
+        self.assertIn("/AUTORESTARTAPP", installer)
 
 
 if __name__ == "__main__":
