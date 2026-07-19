@@ -147,7 +147,7 @@ Fluent.Card {
 
                     Text {
                         Layout.alignment: Qt.AlignHCenter
-                        text: "Developer Mode"
+                        text: "开发者模式"
                         color: Fluent.Enums.textColor.tertiary
                         font.pixelSize: Fluent.Enums.typography.caption
                         font.family: Fluent.Enums.fontFamily
@@ -190,7 +190,7 @@ Fluent.Card {
 
                     Text {
                         Layout.alignment: Qt.AlignHCenter
-                        text: "Gateway"
+                        text: "推理网关"
                         color: Fluent.Enums.textColor.tertiary
                         font.pixelSize: Fluent.Enums.typography.caption
                         font.family: Fluent.Enums.fontFamily

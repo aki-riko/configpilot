@@ -25,6 +25,7 @@ Item {
     readonly property bool configBusy: ClaudeDesktopConfig
                                                ? ClaudeDesktopConfig.operationBusy
                                                : false
+    readonly property int controlHeight: Fluent.Enums.controlSize.buttonHeight
     readonly property bool hasDraftChanges: {
         if (!ClaudeDesktopConfig) return false
         return needsActivation
@@ -123,7 +124,7 @@ Item {
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: "Developer Mode 与 Third-Party Inference Gateway"
+                        text: "开发者模式与第三方推理网关"
                         color: Fluent.Enums.textColor.secondary
                         font.pixelSize: Fluent.Enums.typography.body
                         font.family: Fluent.Enums.fontFamily
@@ -222,7 +223,7 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: 68
+        height: root.controlHeight + 2 * Fluent.Enums.spacing.m
         color: Fluent.Enums.stateColor.controlBg
         border.width: Fluent.Enums.border.thin
         border.color: Fluent.Enums.stateColor.borderLight
@@ -234,34 +235,25 @@ Item {
             anchors.rightMargin: root.pagePadding
             spacing: Fluent.Enums.spacing.m
 
-            ColumnLayout {
+            Text {
                 Layout.fillWidth: true
-                spacing: Fluent.Enums.spacing.xxs
-
-                Text {
-                    Layout.fillWidth: true
-                    text: root.hasDraftChanges
-                          ? "有待应用的 Claude Desktop 配置"
-                          : "开发者模式与第三方 Gateway 已同步"
-                    color: root.hasDraftChanges
-                           ? Fluent.Enums.statusLevel.warningColor
-                           : Fluent.Enums.textColor.secondary
-                    font.pixelSize: Fluent.Enums.typography.caption
-                    font.bold: root.hasDraftChanges
-                    font.family: Fluent.Enums.fontFamily
-                    elide: Text.ElideRight
-                }
-                Text {
-                    Layout.fillWidth: true
-                    text: "保存后请完全退出并重新打开 Claude Desktop"
-                    color: Fluent.Enums.textColor.tertiary
-                    font.pixelSize: Fluent.Enums.typography.caption
-                    font.family: Fluent.Enums.fontFamily
-                    elide: Text.ElideRight
-                }
+                Layout.alignment: Qt.AlignVCenter
+                text: root.hasDraftChanges
+                      ? "有未应用的更改 · 应用后请完全退出并重新打开 Claude Desktop"
+                      : "Claude Desktop 配置已同步"
+                color: root.hasDraftChanges
+                       ? Fluent.Enums.statusLevel.warningColor
+                       : Fluent.Enums.textColor.secondary
+                font.pixelSize: Fluent.Enums.typography.bodySmall
+                font.bold: root.hasDraftChanges
+                font.family: Fluent.Enums.fontFamily
+                elide: Text.ElideRight
             }
 
             Fluent.Button {
+                objectName: "claudeOpenDirectoryButton"
+                Layout.preferredHeight: root.controlHeight
+                Layout.alignment: Qt.AlignVCenter
                 style: Fluent.Enums.button.style_default
                 text: "打开目录"
                 visible: root.width >= 820
@@ -272,6 +264,9 @@ Item {
             }
 
             Fluent.Button {
+                objectName: "claudeReloadButton"
+                Layout.preferredHeight: root.controlHeight
+                Layout.alignment: Qt.AlignVCenter
                 style: Fluent.Enums.button.style_default
                 text: "重新读取"
                 enabled: !root.configBusy
@@ -279,8 +274,13 @@ Item {
             }
 
             Fluent.Button {
+                objectName: "claudeApplyButton"
+                Layout.preferredHeight: root.controlHeight
+                Layout.alignment: Qt.AlignVCenter
                 style: Fluent.Enums.button.style_primary
-                text: root.configBusy ? "处理中..." : "启用并应用"
+                text: root.configBusy
+                      ? "处理中..."
+                      : (root.needsActivation ? "启用并应用" : "应用更改")
                 enabled: !root.configBusy
                          && root.hasDraftChanges
                          && root.fEndpoint.trim().length > 0

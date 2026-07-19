@@ -37,11 +37,10 @@ class ClaudeDesktopUiTests(unittest.TestCase):
         self.assertIn('"clearApiKey": fClearApiKey', page)
         self.assertIn('"clearHeaders": fClearHeaders', page)
         self.assertIn("完全退出并重新打开 Claude Desktop", page)
-        self.assertIn(
-            'text: root.configBusy ? "处理中..." : "启用并应用"',
-            page,
-        )
+        self.assertIn('? "处理中..."', page)
+        self.assertIn('? "启用并应用" : "应用更改"', page)
         self.assertIn("ClaudeDesktopConfig.operationBusy", page)
+        self.assertIn('text: "开发者模式与第三方推理网关"', page)
         for component in ("ClaudeGatewaySection", "ClaudeAdvancedSection"):
             self.assertRegex(
                 page,
@@ -65,6 +64,8 @@ class ClaudeDesktopUiTests(unittest.TestCase):
         self.assertIn("Layout.preferredWidth: summaryLayout.columns === 2", status)
         self.assertIn("summaryLayout.width - 240", status)
         self.assertIn('text: "Claude Desktop"', status)
+        self.assertIn('text: "开发者模式"', status)
+        self.assertIn('text: "推理网关"', status)
         self.assertEqual(status.count("Fluent.Toggle"), 2)
         self.assertIn('objectName: "claudeDeveloperModeToggle"', status)
         self.assertIn('objectName: "claudeGatewayToggle"', status)
@@ -87,8 +88,23 @@ class ClaudeDesktopUiTests(unittest.TestCase):
         self.assertIn("Authorization: Bearer", gateway)
         self.assertIn("x-api-key", gateway)
         self.assertIn("自动补全 /v1", gateway)
+        self.assertIn('text: "网关连接"', gateway)
         self.assertIn("type_password", gateway)
         self.assertIn("留空保持不变", gateway)
+        self.assertIn('objectName: "claudeAuthSchemeBox"', gateway)
+        self.assertIn("Layout.preferredHeight: root.controlHeight", gateway)
+        self.assertIn('objectName: "claudeClearKeyToggle"', gateway)
+
+        self.assertIn(
+            "height: root.controlHeight + 2 * Fluent.Enums.spacing.m",
+            page,
+        )
+        for object_name in (
+            "claudeOpenDirectoryButton",
+            "claudeReloadButton",
+            "claudeApplyButton",
+        ):
+            self.assertIn(f'objectName: "{object_name}"', page)
 
         self.assertIn("/v1/models", advanced)
         self.assertIn("Fluent.Expander", advanced)

@@ -10,6 +10,7 @@ Fluent.Card {
     property string apiKeyValue: ""
     property bool hasApiKey: false
     property bool clearApiKeyValue: false
+    readonly property int controlHeight: Fluent.Enums.controlSize.inputHeight
 
     signal endpointEdited(string value)
     signal authSchemeSelected(string value)
@@ -40,7 +41,7 @@ Fluent.Card {
                 spacing: Fluent.Enums.spacing.xxs
 
                 Text {
-                    text: "Gateway 连接"
+                    text: "网关连接"
                     color: Fluent.Enums.textColor.primary
                     font.pixelSize: Fluent.Enums.typography.subtitle
                     font.bold: true
@@ -56,11 +57,15 @@ Fluent.Card {
                 }
             }
 
-            Fluent.Badge {
-                text: root.hasApiKey ? "密钥已保存" : "未保存密钥"
-                level: root.hasApiKey
-                       ? Fluent.Enums.statusLevel.success
-                       : Fluent.Enums.statusLevel.warning
+            Text {
+                Layout.alignment: Qt.AlignVCenter
+                text: root.hasApiKey ? "已保存密钥" : "尚未保存密钥"
+                color: root.hasApiKey
+                       ? Fluent.Enums.statusLevel.successColor
+                       : Fluent.Enums.statusLevel.warningColor
+                font.pixelSize: Fluent.Enums.typography.caption
+                font.bold: true
+                font.family: Fluent.Enums.fontFamily
             }
         }
 
@@ -69,7 +74,7 @@ Fluent.Card {
             spacing: Fluent.Enums.spacing.xxs
 
             Text {
-                text: "Gateway endpoint"
+                text: "网关地址"
                 color: Fluent.Enums.textColor.secondary
                 font.pixelSize: Fluent.Enums.typography.caption
                 font.bold: true
@@ -79,6 +84,7 @@ Fluent.Card {
                 id: endpointEdit
                 objectName: "claudeEndpointEdit"
                 width: parent.width
+                height: root.controlHeight
                 placeholderText: "https://llm-gateway.example.com（自动补全 /v1）"
                 Component.onCompleted: Qt.callLater(function() {
                     text = root.endpointValue
@@ -117,7 +123,9 @@ Fluent.Card {
                 }
                 Fluent.ComboBoxDefault {
                     id: authSchemeBox
+                    objectName: "claudeAuthSchemeBox"
                     Layout.fillWidth: true
+                    Layout.preferredHeight: root.controlHeight
                     property var options: [
                         { "text": "Authorization: Bearer", "value": "bearer" },
                         { "text": "x-api-key", "value": "x-api-key" }
@@ -145,6 +153,17 @@ Fluent.Card {
                         }
                     }
                 }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: root.authSchemeValue === "x-api-key"
+                          ? "密钥将写入 x-api-key 请求头"
+                          : "密钥将作为 Bearer Token 发送"
+                    color: Fluent.Enums.textColor.tertiary
+                    font.pixelSize: Fluent.Enums.typography.caption
+                    font.family: Fluent.Enums.fontFamily
+                    elide: Text.ElideRight
+                }
             }
 
             ColumnLayout {
@@ -153,7 +172,7 @@ Fluent.Card {
                 spacing: Fluent.Enums.spacing.xxs
 
                 Text {
-                    text: "Gateway API key"
+                    text: "API 密钥"
                     color: Fluent.Enums.textColor.secondary
                     font.pixelSize: Fluent.Enums.typography.caption
                     font.bold: true
@@ -163,6 +182,7 @@ Fluent.Card {
                     id: apiKeyEdit
                     objectName: "claudeApiKeyEdit"
                     Layout.fillWidth: true
+                    Layout.preferredHeight: root.controlHeight
                     inputType: Fluent.Enums.input.type_password
                     enabled: !root.clearApiKeyValue
                     placeholderText: root.hasApiKey
@@ -183,41 +203,45 @@ Fluent.Card {
                         }
                     }
                 }
-            }
-        }
 
-        RowLayout {
-            width: cardColumn.innerWidth
-            spacing: Fluent.Enums.spacing.m
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Fluent.Enums.controlSize.switchHeight
+                    spacing: Fluent.Enums.spacing.s
 
-            Text {
-                Layout.fillWidth: true
-                text: root.hasApiKey
-                      ? "Key 留空会保留现有值"
-                      : "保存后 Key 仅写入本机 Claude 配置"
-                color: Fluent.Enums.textColor.tertiary
-                font.pixelSize: Fluent.Enums.typography.caption
-                font.family: Fluent.Enums.fontFamily
-                elide: Text.ElideRight
-            }
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.hasApiKey
+                              ? "留空将保留当前密钥"
+                              : "仅写入本机 Claude 配置"
+                        color: Fluent.Enums.textColor.tertiary
+                        font.pixelSize: Fluent.Enums.typography.caption
+                        font.family: Fluent.Enums.fontFamily
+                        elide: Text.ElideRight
+                    }
 
-            Fluent.Toggle {
-                id: clearKeyToggle
-                enabled: root.hasApiKey
-                controlType: Fluent.Enums.toggle.control_switch
-                type: Fluent.Enums.toggle.type_default
-                text: "移除已保存 Key"
-                Component.onCompleted: Qt.callLater(function() {
-                    checked = root.clearApiKeyValue
-                })
-                onToggled: function(checkedValue) {
-                    root.clearApiKeyToggled(checkedValue)
-                }
-                Connections {
-                    target: root
-                    function onClearApiKeyValueChanged() {
-                        if (clearKeyToggle.checked !== root.clearApiKeyValue) {
-                            clearKeyToggle.checked = root.clearApiKeyValue
+                    Fluent.Toggle {
+                        id: clearKeyToggle
+                        objectName: "claudeClearKeyToggle"
+                        Layout.alignment: Qt.AlignVCenter
+                        enabled: root.hasApiKey
+                        visible: root.hasApiKey
+                        controlType: Fluent.Enums.toggle.control_switch
+                        type: Fluent.Enums.toggle.type_default
+                        text: "删除"
+                        Component.onCompleted: Qt.callLater(function() {
+                            checked = root.clearApiKeyValue
+                        })
+                        onToggled: function(checkedValue) {
+                            root.clearApiKeyToggled(checkedValue)
+                        }
+                        Connections {
+                            target: root
+                            function onClearApiKeyValueChanged() {
+                                if (clearKeyToggle.checked !== root.clearApiKeyValue) {
+                                    clearKeyToggle.checked = root.clearApiKeyValue
+                                }
+                            }
                         }
                     }
                 }

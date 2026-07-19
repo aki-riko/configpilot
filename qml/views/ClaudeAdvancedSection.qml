@@ -14,7 +14,7 @@ Fluent.Expander {
     signal headersEdited(string value)
     signal clearHeadersToggled(bool value)
 
-    title: "模型与额外 Header"
+    title: "模型与请求头"
     content: "高级配置 · 可选覆盖模型发现和额外请求头"
     expanded: false
 
@@ -28,13 +28,13 @@ Fluent.Expander {
         ColumnLayout {
             Layout.fillWidth: true
             Layout.minimumWidth: 0
-            spacing: Fluent.Enums.spacing.xs
+            spacing: Fluent.Enums.spacing.xxs
 
             Text {
                 Layout.fillWidth: true
-                text: "Model list"
+                text: "模型列表"
                 color: Fluent.Enums.textColor.secondary
-                font.pixelSize: Fluent.Enums.typography.body
+                font.pixelSize: Fluent.Enums.typography.caption
                 font.bold: true
                 font.family: Fluent.Enums.fontFamily
             }
@@ -72,15 +72,15 @@ Fluent.Expander {
         ColumnLayout {
             Layout.fillWidth: true
             Layout.minimumWidth: 0
-            spacing: Fluent.Enums.spacing.xs
+            spacing: Fluent.Enums.spacing.xxs
 
             Text {
                 Layout.fillWidth: true
                 text: root.headerCount > 0
-                      ? "额外 Header · 已保存 " + root.headerCount + " 项"
-                      : "额外 Header · 可选"
+                      ? "额外请求头 · 已保存 " + root.headerCount + " 项"
+                      : "额外请求头 · 可选"
                 color: Fluent.Enums.textColor.secondary
-                font.pixelSize: Fluent.Enums.typography.body
+                font.pixelSize: Fluent.Enums.typography.caption
                 font.bold: true
                 font.family: Fluent.Enums.fontFamily
             }
@@ -116,10 +116,11 @@ Fluent.Expander {
             }
             Fluent.Toggle {
                 id: clearHeadersToggle
+                objectName: "claudeClearHeadersToggle"
                 enabled: root.headerCount > 0
                 controlType: Fluent.Enums.toggle.control_switch
                 type: Fluent.Enums.toggle.type_default
-                text: "移除已保存 Header"
+                text: "删除已保存的请求头"
                 Component.onCompleted: Qt.callLater(function() {
                     checked = root.clearHeadersValue
                 })
