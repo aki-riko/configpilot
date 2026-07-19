@@ -73,12 +73,37 @@ class AsyncTaskTests(unittest.TestCase):
             )
 
         runner.close()
+        runner._thread.join(timeout=1)
 
         self.assertEqual(executed, [1, 2, 3])
         self.assertFalse(runner._thread.is_alive())
         self.assertFalse(runner.busy)
         with self.assertRaisesRegex(RuntimeError, "已关闭"):
             runner.submit(lambda: None, lambda result: None, lambda error: None)
+
+    def test_drain_close_never_waits_on_calling_thread(self):
+        runner = SerialTaskRunner(
+            thread_name="ConfigPilotNonBlockingCloseTest",
+            drain_on_close=True,
+        )
+        started = threading.Event()
+        release = threading.Event()
+
+        def operation():
+            started.set()
+            release.wait(1)
+
+        runner.submit(operation, lambda result: None, lambda error: None)
+        self.assertTrue(started.wait(1))
+        before = time.perf_counter()
+        runner.close()
+        elapsed = time.perf_counter() - before
+
+        self.assertLess(elapsed, 0.1)
+        self.assertTrue(runner._thread.is_alive())
+        release.set()
+        runner._thread.join(timeout=1)
+        self.assertFalse(runner._thread.is_alive())
 
     def test_parent_destruction_does_not_raise_in_worker_thread(self):
         _ = APP

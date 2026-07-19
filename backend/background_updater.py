@@ -53,10 +53,6 @@ class _DownloadWriter:
         self._started = True
         self._thread.start()
 
-    def wait(self) -> None:
-        if self._started and threading.current_thread() is not self._thread:
-            self._thread.join()
-
     def try_enqueue(self, chunk: bytes) -> bool:
         try:
             self._chunks.put_nowait(chunk)
@@ -348,4 +344,3 @@ class BackgroundDownloadUpdater(Updater):
         self._pending_download_url = ""
         if writer is not None:
             writer.request_finish("更新器已关闭")
-            writer.wait()

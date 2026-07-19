@@ -96,6 +96,33 @@ class CodexConfigAuthTests(unittest.TestCase):
                 self.assertLess(call_elapsed, 0.1)
                 wait_for_idle(config)
 
+    def test_real_model_profiles_file_is_loaded_off_main_thread(self):
+        codex_config = self.load_module()
+        main_thread = threading.get_ident()
+        loader_threads = []
+        original_loader = codex_config.ModelProfiles.from_file
+
+        def observed_loader(path):
+            self.assertEqual(Path(path).resolve(), (ROOT / "model_profiles.json").resolve())
+            loader_threads.append(threading.get_ident())
+            return original_loader(path)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_home = Path(tmp) / ".codex"
+            codex_home.mkdir()
+            codex_config._codex_home = lambda: str(codex_home)
+            codex_config._app_dir = lambda: str(ROOT)
+            with patch.object(
+                codex_config.ModelProfiles,
+                "from_file",
+                side_effect=observed_loader,
+            ):
+                config = codex_config.CodexConfig()
+                wait_for_idle(config)
+
+        self.assertEqual(len(loader_threads), 1)
+        self.assertNotEqual(loader_threads[0], main_thread)
+
     def test_set_key_moves_old_auth_to_backup_and_writes_clean_auth(self):
         codex_config = self.load_module()
 

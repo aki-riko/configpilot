@@ -29,9 +29,13 @@ Item {
     readonly property int pagePadding: width < 720
                                        ? Fluent.Enums.spacing.l
                                        : Fluent.Enums.spacing.xl
-    readonly property var currentContextPreset: CodexConfig
-                                                ? CodexConfig.stableContextPreset()
-                                                : ({})
+    readonly property int profilesRevision: CodexConfig
+                                            ? CodexConfig.profilesRevision
+                                            : 0
+    readonly property var currentContextPreset: {
+        var revision = profilesRevision
+        return CodexConfig ? CodexConfig.stableContextPreset() : ({})
+    }
     readonly property real contextWindowNumber: parsePositive(fContextWindow)
     readonly property real autoCompactNumber: parsePositive(fAutoCompactLimit)
     readonly property real compactRatio: contextWindowNumber > 0 && autoCompactNumber > 0

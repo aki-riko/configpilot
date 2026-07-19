@@ -165,6 +165,10 @@ QtObject {
                         downloadDialog.close()
                         appWindow.showUpdateError(message)
                     }
+
+                    function onReleasePageOpenFailed(message) {
+                        appWindow.showUpdateError(message)
+                    }
                 }
             }
         }

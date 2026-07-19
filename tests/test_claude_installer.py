@@ -94,7 +94,9 @@ class ClaudeInstallerTests(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / spec.file_name
+            download_dir = Path(tmp) / "download"
+            download_dir.mkdir()
+            path = download_dir / spec.file_name
             path.write_bytes(b"official-script")
 
             def slow_verify(resolved, downloaded_path):
@@ -133,7 +135,7 @@ class ClaudeInstallerTests(unittest.TestCase):
             path = Path(tmp) / spec.file_name
             path.write_bytes(b"official-script")
             emitter = threading.Thread(
-                target=lambda: backend._workerReady.emit(spec, str(path))
+                target=lambda: backend._workerReady.emit(spec, str(path), "powershell.exe")
             )
             with mock.patch.object(backend, "_launch") as launch:
                 emitter.start()
@@ -143,6 +145,96 @@ class ClaudeInstallerTests(unittest.TestCase):
                 wait_until(lambda: not backend.busy, timeout=2)
 
             launch.assert_not_called()
+
+    def test_script_command_resolution_runs_off_main_thread(self):
+        sources, installer = self.load_modules()
+        with mock.patch.object(sources.sys, "platform", "win32"):
+            spec = sources.official_install_spec("claude-code")
+        backend = installer.ClaudeInstaller()
+        main_thread = threading.get_ident()
+        resolver_threads = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / spec.file_name
+            path.write_bytes(b"official-script")
+
+            def observed_which(command):
+                resolver_threads.append(threading.get_ident())
+                return "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+
+            with (
+                mock.patch.object(installer, "official_install_spec", return_value=spec),
+                mock.patch.object(installer, "_download_to_temp", return_value=path),
+                mock.patch.object(installer, "verify_download"),
+                mock.patch.object(installer.shutil, "which", side_effect=observed_which),
+                mock.patch.object(backend, "_launch") as launch,
+            ):
+                backend.install("claude-code")
+                wait_until(lambda: launch.called)
+
+            backend.shutdown()
+
+        self.assertEqual(len(resolver_threads), 1)
+        self.assertNotEqual(resolver_threads[0], main_thread)
+
+    def test_windows_shell_launch_runs_off_main_thread(self):
+        sources, installer = self.load_modules()
+        with (
+            mock.patch.object(sources.sys, "platform", "win32"),
+            mock.patch.object(sources.platform, "machine", return_value="AMD64"),
+        ):
+            spec = sources.official_install_spec("claude-desktop")
+        backend = installer.ClaudeInstaller()
+        main_thread = threading.get_ident()
+        launcher_threads = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / spec.file_name
+            path.write_bytes(b"official-installer")
+
+            def observed_launch(installer_path):
+                launcher_threads.append(threading.get_ident())
+
+            with mock.patch.object(
+                backend,
+                "_open_windows_installer",
+                side_effect=observed_launch,
+            ):
+                backend._on_worker_ready(spec, str(path), "")
+                wait_until(lambda: not backend.busy)
+
+        self.assertEqual(len(launcher_threads), 1)
+        self.assertNotEqual(launcher_threads[0], main_thread)
+
+    def test_macos_package_open_runs_off_main_thread(self):
+        sources, installer = self.load_modules()
+        with (
+            mock.patch.object(sources.sys, "platform", "darwin"),
+            mock.patch.object(sources.platform, "machine", return_value="arm64"),
+        ):
+            spec = sources.official_install_spec("claude-desktop")
+        backend = installer.ClaudeInstaller()
+        main_thread = threading.get_ident()
+        opener_threads = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / spec.file_name
+            path.write_bytes(b"official-dmg")
+
+            def observed_open(target):
+                opener_threads.append(threading.get_ident())
+                return True
+
+            with mock.patch.object(
+                installer,
+                "open_external_target",
+                side_effect=observed_open,
+            ):
+                backend._on_worker_ready(spec, str(path), "")
+                wait_until(lambda: not backend.busy)
+
+        self.assertEqual(len(opener_threads), 1)
+        self.assertNotEqual(opener_threads[0], main_thread)
 
     def test_parent_destruction_does_not_raise_in_installer_thread(self):
         sources, installer = self.load_modules()

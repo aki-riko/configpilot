@@ -8,8 +8,7 @@ import os
 from pathlib import Path
 import uuid
 
-from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QObject, Property, Signal, Slot
 
 from backend.claude_install_sources import (
     claude_desktop_installed,
@@ -17,6 +16,7 @@ from backend.claude_install_sources import (
 )
 from backend.claude_installer import ClaudeInstaller
 from backend.async_tasks import SerialTaskRunner
+from backend.system_launcher import open_external_target
 from backend.claude_config_io import (
     atomic_write_json,
     models_to_text,
@@ -479,16 +479,19 @@ class ClaudeDesktopConfig(QObject):
             ),
         )
 
-    def _open_config_directory(self, path: object) -> None:
-        directory = Path(path)
-        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory))):
+    def _open_config_directory_worker(self) -> bool:
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        return open_external_target(self._data_dir)
+
+    def _open_config_directory_completed(self, opened: object) -> None:
+        if not bool(opened):
             self.notify.emit(3, "打开失败", "系统未能打开配置目录")
 
     @Slot()
     def openConfigDirectory(self):
         self._tasks.submit(
-            lambda: (self._data_dir.mkdir(parents=True, exist_ok=True), self._data_dir)[1],
-            self._open_config_directory,
+            self._open_config_directory_worker,
+            self._open_config_directory_completed,
             lambda exc: self._change_failed(
                 exc,
                 invalid_title="无法打开配置目录",

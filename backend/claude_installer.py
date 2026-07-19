@@ -16,8 +16,7 @@ import threading
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
-from PySide6.QtCore import QCoreApplication, QObject, Property, QProcess, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QCoreApplication, QObject, Property, QProcess, Signal, Slot
 
 from backend.claude_install_sources import (
     InstallSpec,
@@ -36,6 +35,7 @@ from backend.claude_install_utils import (
     request as _request,
     validate_response_url as _validate_response_url,
 )
+from backend.system_launcher import open_external_target
 
 
 LOGGER = logging.getLogger(__name__)
@@ -181,9 +181,11 @@ class ClaudeInstaller(QObject):
     changed = Signal()
     notify = Signal(int, str, str)
     _workerProgress = Signal(int, str)
-    _workerReady = Signal(object, str)
+    _workerReady = Signal(object, str, str)
     _workerFailed = Signal(str)
     _workerCancelled = Signal()
+    _externalLaunchReady = Signal(str, str)
+    _externalLaunchFailed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -193,6 +195,7 @@ class ClaudeInstaller(QObject):
         self._status = ""
         self._cancel_event: threading.Event | None = None
         self._thread: threading.Thread | None = None
+        self._launch_thread: threading.Thread | None = None
         self._process: QProcess | None = None
         self._download_path = ""
         self._closing = threading.Event()
@@ -200,6 +203,8 @@ class ClaudeInstaller(QObject):
         self._workerReady.connect(self._on_worker_ready)
         self._workerFailed.connect(self._on_worker_failed)
         self._workerCancelled.connect(self._on_worker_cancelled)
+        self._externalLaunchReady.connect(self._on_external_launch_ready)
+        self._externalLaunchFailed.connect(self._on_external_launch_failed)
         app = QCoreApplication.instance()
         if app is not None:
             app.aboutToQuit.connect(self.shutdown)
@@ -288,7 +293,9 @@ class ClaudeInstaller(QObject):
             self._raise_if_cancelled(cancel_event)
             verify_download(resolved, path)
             self._raise_if_cancelled(cancel_event)
-            if not self._emit_worker(self._workerReady, resolved, str(path)):
+            program = self._resolve_script_program(resolved)
+            self._raise_if_cancelled(cancel_event)
+            if not self._emit_worker(self._workerReady, resolved, str(path), program):
                 _remove_download_tree(path.parent)
         except InstallCancelled:
             if path is not None:
@@ -338,14 +345,26 @@ class ClaudeInstaller(QObject):
             raise RuntimeError("Anthropic Linux 软件包索引编码无效") from exc
         return resolve_linux_package(spec, index_text)
 
+    @staticmethod
+    def _resolve_script_program(spec: InstallSpec) -> str:
+        if spec.kind == "powershell-script":
+            program = shutil.which("powershell.exe") or shutil.which("pwsh.exe")
+        elif spec.kind == "shell-script":
+            program = shutil.which("bash")
+        else:
+            return ""
+        if not program:
+            raise RuntimeError("系统缺少执行 Claude Code 官方安装脚本所需的命令")
+        return program
+
     @Slot(int, str)
     def _on_worker_progress(self, progress: int, status: str):
         self._progress = progress
         self._status = status
         self.changed.emit()
 
-    @Slot(object, str)
-    def _on_worker_ready(self, spec: InstallSpec, path: str):
+    @Slot(object, str, str)
+    def _on_worker_ready(self, spec: InstallSpec, path: str, program: str):
         self._thread = None
         if self._closing.is_set() or (
             self._cancel_event is not None and self._cancel_event.is_set()
@@ -371,24 +390,18 @@ class ClaudeInstaller(QObject):
             status=f"正在启动 {spec.display_name} 安装程序",
         )
         try:
-            self._launch(spec, Path(path))
+            self._launch(spec, Path(path), program)
         except Exception as exc:
             LOGGER.exception("启动 Claude 安装程序失败")
             self._cleanup_download()
             self._fail(str(exc))
 
-    def _launch(self, spec: InstallSpec, path: Path):
+    def _launch(self, spec: InstallSpec, path: Path, program: str):
         if spec.kind in {"powershell-script", "shell-script"}:
-            self._start_script(spec, path)
+            self._start_script(spec, path, program)
             return
-        if spec.kind == "windows-exe":
-            self._open_windows_installer(path)
-            self._finish("安装程序已打开", "请按 Anthropic 安装向导完成 Claude Desktop 安装。")
-            return
-        if spec.kind in {"macos-dmg", "linux-deb"}:
-            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
-                raise RuntimeError("系统未能打开已验证的 Claude Desktop 安装包")
-            self._finish("安装包已打开", "请在系统安装界面中完成 Claude Desktop 安装。")
+        if spec.kind in {"windows-exe", "macos-dmg", "linux-deb"}:
+            self._start_external_installer(spec, path)
             return
         raise RuntimeError(f"不支持的 Claude 安装类型: {spec.kind}")
 
@@ -402,12 +415,10 @@ class ClaudeInstaller(QObject):
         if int(result) <= 32:
             raise RuntimeError(f"Windows 无法启动 Claude Desktop 安装程序: {result}")
 
-    def _start_script(self, spec: InstallSpec, path: Path):
+    def _start_script(self, spec: InstallSpec, path: Path, program: str):
         if spec.kind == "powershell-script":
-            program = shutil.which("powershell.exe") or shutil.which("pwsh.exe")
             arguments = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(path), "latest"]
         else:
-            program = shutil.which("bash")
             arguments = [str(path), "latest"]
         if not program:
             raise RuntimeError("系统缺少执行 Claude Code 官方安装脚本所需的命令")
@@ -420,6 +431,46 @@ class ClaudeInstaller(QObject):
         self._process.start(program, arguments)
         self._status = "正在安装 Claude Code CLI"
         self.changed.emit()
+
+    def _start_external_installer(self, spec: InstallSpec, path: Path) -> None:
+        self._launch_thread = threading.Thread(
+            target=self._launch_external_worker,
+            args=(spec, path),
+            daemon=True,
+            name="ConfigPilotClaudeLauncher",
+        )
+        self._launch_thread.start()
+
+    def _launch_external_worker(self, spec: InstallSpec, path: Path) -> None:
+        try:
+            if spec.kind == "windows-exe":
+                self._open_windows_installer(path)
+                title = "安装程序已打开"
+                message = "请按 Anthropic 安装向导完成 Claude Desktop 安装。"
+            else:
+                if not open_external_target(path):
+                    raise RuntimeError("系统未能打开已验证的 Claude Desktop 安装包")
+                title = "安装包已打开"
+                message = "请在系统安装界面中完成 Claude Desktop 安装。"
+        except Exception as exc:
+            LOGGER.exception("启动 Claude Desktop 安装程序失败")
+            self._emit_worker(self._externalLaunchFailed, str(exc))
+            return
+        self._emit_worker(self._externalLaunchReady, title, message)
+
+    @Slot(str, str)
+    def _on_external_launch_ready(self, title: str, message: str) -> None:
+        self._launch_thread = None
+        if not self._closing.is_set():
+            self._finish(title, message)
+
+    @Slot(str)
+    def _on_external_launch_failed(self, message: str) -> None:
+        self._launch_thread = None
+        if self._closing.is_set():
+            return
+        self._cleanup_download()
+        self._fail(message)
 
     @Slot()
     def _drain_process_output(self):

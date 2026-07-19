@@ -3,13 +3,54 @@
 
 from __future__ import annotations
 
+import ctypes
+from ctypes import wintypes
+import logging
+import os
 import sys
 from typing import Callable, Optional
 
-from PySide6.QtCore import QObject, Property, Signal, Slot
+from PySide6.QtCore import QCoreApplication, QObject, Property, Signal, Slot
 
 from .app_settings import AppSettings
+from .async_tasks import SerialTaskRunner
 from .background_updater import BackgroundDownloadUpdater
+from .system_launcher import is_http_url, open_external_target
+
+
+LOGGER = logging.getLogger(__name__)
+_SHELL_EXECUTE_ERRORS = (
+    OSError,
+    AttributeError,
+    ctypes.ArgumentError,
+    TypeError,
+    ValueError,
+)
+
+
+def _launch_windows_update_installer(installer_path: str, silent_args: str) -> bool:
+    """在后台线程通过 Windows Shell 启动带 manifest 的安装器。"""
+    if sys.platform != "win32" or not installer_path or not os.path.isfile(installer_path):
+        return False
+    try:
+        shell_execute = ctypes.windll.shell32.ShellExecuteW
+        shell_execute.argtypes = [
+            wintypes.HWND,
+            wintypes.LPCWSTR,
+            wintypes.LPCWSTR,
+            wintypes.LPCWSTR,
+            wintypes.LPCWSTR,
+            ctypes.c_int,
+        ]
+        shell_execute.restype = wintypes.HINSTANCE
+        arguments = " ".join(part for part in silent_args.split(" ") if part) or None
+        result = int(
+            shell_execute(None, "open", installer_path, arguments, None, 1) or 0
+        )
+    except _SHELL_EXECUTE_ERRORS:
+        LOGGER.exception("启动更新安装程序异常: %s", installer_path)
+        return False
+    return result > 32
 
 
 class AppUpdater(QObject):
@@ -23,6 +64,7 @@ class AppUpdater(QObject):
     downloadReady = Signal()
     downloadFailed = Signal(str)
     installLaunchFailed = Signal(str)
+    releasePageOpenFailed = Signal(str)
 
     def __init__(
         self,
@@ -30,12 +72,22 @@ class AppUpdater(QObject):
         prismqml_version: str,
         parent: Optional[QObject] = None,
         updater_factory: Callable = BackgroundDownloadUpdater,
+        installer_launcher: Optional[Callable[[str, str], bool]] = None,
+        external_opener: Optional[Callable[[str], bool]] = None,
+        quit_callback: Optional[Callable[[], None]] = None,
     ):
         super().__init__(parent)
         self._settings = settings
         self._prismqml_version = prismqml_version
         self._checking = False
         self._manual_check = False
+        self._installer_launcher = installer_launcher or _launch_windows_update_installer
+        self._external_opener = external_opener or open_external_target
+        self._quit_callback = quit_callback or QCoreApplication.quit
+        self._installer_tasks = SerialTaskRunner(
+            self,
+            thread_name="ConfigPilotUpdateLauncher",
+        )
         updates = settings.updates
         self._updater = updater_factory(
             updates.repository,
@@ -116,7 +168,28 @@ class AppUpdater(QObject):
 
     @Slot(str, result=bool)
     def openReleasePage(self, url: str) -> bool:  # noqa: N802 - QML 公开槽
-        return self._updater.openInBrowser(url)
+        if not is_http_url(url):
+            return False
+        try:
+            self._installer_tasks.submit(
+                lambda: self._external_opener(url),
+                self._on_release_page_opened,
+                self._on_release_page_open_error,
+            )
+        except RuntimeError:
+            return False
+        return True
+
+    def _on_release_page_opened(self, opened: object) -> None:
+        if not bool(opened):
+            self.releasePageOpenFailed.emit("无法打开官方发布页面")
+
+    def _on_release_page_open_error(self, exc: Exception) -> None:
+        LOGGER.exception(
+            "打开官方发布页面失败",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+        self.releasePageOpenFailed.emit("无法打开官方发布页面")
 
     def _on_update_available(
         self, version: str, notes: str, download_url: str, html_url: str
@@ -132,9 +205,24 @@ class AppUpdater(QObject):
 
     def _on_download_finished(self, installer_path: str) -> None:
         self.downloadReady.emit()
-        launched = self._updater.runInstallerAndQuit(
-            installer_path,
-            self._settings.updates.windows_installer_args,
+        self._installer_tasks.submit(
+            lambda: self._installer_launcher(
+                installer_path,
+                self._settings.updates.windows_installer_args,
+            ),
+            self._on_installer_launched,
+            self._on_installer_launch_error,
         )
-        if not launched:
-            self.installLaunchFailed.emit("无法启动更新安装程序，请稍后重试")
+
+    def _on_installer_launched(self, launched: object) -> None:
+        if bool(launched):
+            self._quit_callback()
+            return
+        self.installLaunchFailed.emit("无法启动更新安装程序，请稍后重试")
+
+    def _on_installer_launch_error(self, exc: Exception) -> None:
+        LOGGER.exception(
+            "启动更新安装程序失败",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+        self.installLaunchFailed.emit("无法启动更新安装程序，请稍后重试")

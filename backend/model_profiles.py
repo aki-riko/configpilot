@@ -21,6 +21,11 @@ class ModelProfiles:
         self._reasoning_overrides = {}
 
     @classmethod
+    def empty(cls):
+        """返回异步加载完成前可安全查询的空模型配置。"""
+        return cls([], [], {}, {})
+
+    @classmethod
     def from_file(cls, path):
         source = Path(path)
         with source.open("r", encoding="utf-8") as handle:

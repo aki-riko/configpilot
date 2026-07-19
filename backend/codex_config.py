@@ -49,7 +49,10 @@ class CodexConfig(QObject):
         self._auth_path = self._store.auth_path
         self._providers_path = os.path.join(_app_dir(), "providers.json")
         self._model_profiles_path = os.path.join(_app_dir(), "model_profiles.json")
-        self._model_profiles = ModelProfiles.from_file(self._model_profiles_path)
+        self._model_profiles = ModelProfiles.empty()
+        self._model_profiles_loaded = False
+        self._profiles_revision = 0
+        self._reasoning_refresh_requested = False
         self._config_exists = False
         self._provider = ""
         self._base_url = ""
@@ -81,6 +84,11 @@ class CodexConfig(QObject):
         )
         self._config_tasks.busyChanged.connect(self.operationBusyChanged.emit)
         self._presets = []
+        self._config_tasks.submit(
+            lambda: ModelProfiles.from_file(self._model_profiles_path),
+            self._apply_model_profiles,
+            self._model_profiles_failed,
+        )
         self.reloadPresets()
         self.reload()
 
@@ -115,9 +123,33 @@ class CodexConfig(QObject):
     def _presets_failed(self, exc):
         self.notify.emit(2, "预置列表读取失败", f"providers.json: {exc}")
 
+    def _apply_model_profiles(self, profiles):
+        self._model_profiles = profiles
+        self._finish_model_profiles_load()
+
+    def _model_profiles_failed(self, exc):
+        LOGGER.exception(
+            "读取模型配置失败",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+        self.notify.emit(3, "模型配置读取失败", str(exc))
+        self._finish_model_profiles_load()
+
+    def _finish_model_profiles_load(self):
+        self._model_profiles_loaded = True
+        self._profiles_revision += 1
+        self.reasoningProfilesChanged.emit()
+        if self._reasoning_refresh_requested:
+            self._reasoning_refresh_requested = False
+            self.refreshReasoningProfiles()
+
     @Property("QVariantList", notify=providersChanged)
     def presets(self):
         return self._presets
+
+    @Property(int, notify=reasoningProfilesChanged)
+    def profilesRevision(self):
+        return self._profiles_revision
 
     @Property(str, notify=changed)
     def configPath(self):
@@ -274,6 +306,9 @@ class CodexConfig(QObject):
 
     @Slot()
     def refreshReasoningProfiles(self):
+        if not self._model_profiles_loaded:
+            self._reasoning_refresh_requested = True
+            return
         if self._reasoning_refresh_pending:
             return
         self._reasoning_refresh_pending = True

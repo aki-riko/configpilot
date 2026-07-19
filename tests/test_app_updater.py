@@ -4,11 +4,12 @@ import os
 from pathlib import Path
 import tempfile
 import threading
+import time
 import unittest
 import uuid
 from unittest import mock
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 import shiboken6
 
 from backend.app_settings import load_app_settings
@@ -106,11 +107,28 @@ class FakeEngineUpdater(QObject):
 class AppUpdaterTests(unittest.TestCase):
     def setUp(self):
         self.settings = load_app_settings(ROOT / "app_config.json")
+        self.launch_calls = []
+        self.launch_result = True
+        self.open_calls = []
+        self.quit_calls = []
+
+        def installer_launcher(path, args):
+            self.launch_calls.append((path, args, threading.get_ident()))
+            return self.launch_result
+
+        def external_opener(url):
+            self.open_calls.append((url, threading.get_ident()))
+            return True
+
         self.controller = AppUpdater(
             self.settings,
             "0.3.1.1",
             updater_factory=FakeEngineUpdater,
+            installer_launcher=installer_launcher,
+            external_opener=external_opener,
+            quit_callback=lambda: self.quit_calls.append(True),
         )
+        self.addCleanup(self.controller._installer_tasks.close)
         self.engine = self.controller._updater
 
     def test_real_configuration_builds_verified_engine_contract(self):
@@ -146,28 +164,82 @@ class AppUpdaterTests(unittest.TestCase):
         self.engine.upToDate.emit("v1.0.15")
         self.assertEqual(results, [("v1.0.15", True)])
 
+    def test_release_page_shell_open_runs_off_main_thread(self):
+        main_thread = threading.get_ident()
+
+        self.assertTrue(
+            self.controller.openReleasePage(
+                "https://github.com/aki-riko/ConfigPilot/releases/tag/v1.0.15"
+            )
+        )
+        wait_until(lambda: bool(self.open_calls))
+
+        self.assertEqual(
+            self.open_calls[0][0],
+            "https://github.com/aki-riko/ConfigPilot/releases/tag/v1.0.15",
+        )
+        self.assertNotEqual(self.open_calls[0][1], main_thread)
+        self.assertFalse(self.controller.openReleasePage("file:///C:/Windows/System32"))
+
     def test_download_completion_uses_configured_silent_installer_args(self):
         ready = []
         self.controller.downloadReady.connect(lambda: ready.append(True))
 
         self.controller.downloadUpdate("https://example.test/setup.exe")
         self.engine.downloadFinished.emit("C:/Temp/setup.exe")
+        wait_until(lambda: bool(self.quit_calls))
 
         self.assertEqual(self.engine.download_urls, ["https://example.test/setup.exe"])
         self.assertEqual(ready, [True])
         self.assertEqual(
-            self.engine.install_calls,
+            [call[:2] for call in self.launch_calls],
             [("C:/Temp/setup.exe", self.settings.updates.windows_installer_args)],
         )
+        self.assertNotEqual(self.launch_calls[0][2], threading.get_ident())
+        self.assertEqual(self.quit_calls, [True])
 
     def test_installer_launch_failure_is_visible(self):
         failures = []
-        self.engine.install_result = False
+        self.launch_result = False
         self.controller.installLaunchFailed.connect(failures.append)
 
         self.engine.downloadFinished.emit("C:/Temp/setup.exe")
+        wait_until(lambda: bool(failures))
 
         self.assertEqual(failures, ["无法启动更新安装程序，请稍后重试"])
+
+    def test_slow_installer_launch_does_not_block_qt_event_loop(self):
+        main_thread = threading.get_ident()
+        worker_threads = []
+        timer_fired = []
+        failures = []
+
+        def slow_launcher(path, args):
+            worker_threads.append(threading.get_ident())
+            time.sleep(0.2)
+            return False
+
+        controller = AppUpdater(
+            self.settings,
+            "0.3.1.1",
+            updater_factory=FakeEngineUpdater,
+            installer_launcher=slow_launcher,
+            quit_callback=lambda: None,
+        )
+        self.addCleanup(controller._installer_tasks.close)
+        controller.installLaunchFailed.connect(failures.append)
+        QTimer.singleShot(10, lambda: timer_fired.append(True))
+
+        before = time.perf_counter()
+        controller._updater.downloadFinished.emit("C:/Temp/setup.exe")
+        elapsed = time.perf_counter() - before
+        wait_until(lambda: bool(timer_fired), timeout=0.15)
+
+        self.assertLess(elapsed, 0.1)
+        self.assertEqual(timer_fired, [True])
+        wait_until(lambda: bool(failures))
+        self.assertEqual(len(worker_threads), 1)
+        self.assertNotEqual(worker_threads[0], main_thread)
 
     def test_invalid_repository_is_rejected(self):
         payload = json.loads((ROOT / "app_config.json").read_text(encoding="utf-8"))
@@ -248,7 +320,7 @@ class AppUpdaterTests(unittest.TestCase):
             first.shutdown()
             second.shutdown()
 
-    def test_shutdown_waits_for_writer_and_removes_partial_file(self):
+    def test_shutdown_requests_async_writer_cleanup_without_waiting(self):
         _ = APP
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "partial.exe"
@@ -271,9 +343,15 @@ class AppUpdaterTests(unittest.TestCase):
             self.assertTrue(path.exists())
             self.assertTrue(writer.try_enqueue(b"partial-payload"))
 
-            updater.shutdown()
+            with mock.patch.object(
+                writer._thread,
+                "join",
+                side_effect=AssertionError("GUI 关闭路径不应等待写入线程"),
+            ) as join_mock:
+                updater.shutdown()
 
-            self.assertTrue(completed.is_set())
+            join_mock.assert_not_called()
+            self.assertTrue(completed.wait(1))
             self.assertFalse(writer._thread.is_alive())
             self.assertFalse(path.exists())
 
@@ -299,7 +377,7 @@ class AppUpdaterTests(unittest.TestCase):
             try:
                 self.assertTrue(writer.try_enqueue(b"payload"))
                 writer.request_finish()
-                writer.wait()
+                writer._thread.join(timeout=1)
             finally:
                 threading.excepthook = original_hook
 
@@ -340,7 +418,7 @@ class AppUpdaterTests(unittest.TestCase):
             finally:
                 threading.excepthook = original_hook
 
-            self.assertTrue(completed.is_set())
+            self.assertTrue(completed.wait(1))
             self.assertFalse(writer._thread.is_alive())
             self.assertFalse(path.exists())
             self.assertEqual(worker_errors, [])

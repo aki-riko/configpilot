@@ -10,7 +10,7 @@ import queue
 import threading
 from typing import Any
 
-from PySide6.QtCore import QCoreApplication, QObject, Property, Signal, Slot
+from PySide6.QtCore import QCoreApplication, QObject, Property, QTimer, Signal, Slot
 
 
 LOGGER = logging.getLogger(__name__)
@@ -21,7 +21,6 @@ class SerialTaskRunner(QObject):
     """后台串行执行任务，避免阻塞 GUI，同时保留任务提交顺序。"""
 
     busyChanged = Signal()
-    _completed = Signal(int, object, object)
 
     def __init__(
         self,
@@ -32,6 +31,7 @@ class SerialTaskRunner(QObject):
     ):
         super().__init__(parent)
         self._tasks: queue.Queue = queue.Queue()
+        self._results: queue.Queue = queue.Queue()
         self._callbacks: dict[
             int,
             tuple[Callable[[Any], None], Callable[[Exception], None]],
@@ -40,9 +40,12 @@ class SerialTaskRunner(QObject):
         self._pending = 0
         self._drain_on_close = bool(drain_on_close)
         self._closed = threading.Event()
-        self._completed.connect(self._deliver)
+        self._result_timer = QTimer(self)
+        self._result_timer.setInterval(5)
+        self._result_timer.timeout.connect(self._drain_results)
         self._thread = threading.Thread(
-            target=self._run,
+            target=self._worker_loop,
+            args=(self._tasks, self._results, self._closed),
             daemon=True,
             name=thread_name,
         )
@@ -71,12 +74,15 @@ class SerialTaskRunner(QObject):
         self._pending += 1
         if not was_busy:
             self.busyChanged.emit()
+        if not self._result_timer.isActive():
+            self._result_timer.start()
         self._tasks.put((task_id, operation))
         return task_id
 
-    def _run(self) -> None:
+    @staticmethod
+    def _worker_loop(tasks: queue.Queue, results: queue.Queue, closed: threading.Event) -> None:
         while True:
-            item = self._tasks.get()
+            item = tasks.get()
             if item is _STOP:
                 return
             task_id, operation = item
@@ -86,14 +92,20 @@ class SerialTaskRunner(QObject):
             except Exception as exc:  # 后台异常统一交回主线程处理
                 result = None
                 error = exc
-            if self._closed.is_set():
+            if closed.is_set():
                 continue
+            results.put((task_id, result, error))
+
+    @Slot()
+    def _drain_results(self) -> None:
+        while True:
             try:
-                self._completed.emit(task_id, result, error)
-            except RuntimeError:
-                if not self._closed.is_set():
-                    LOGGER.exception("后台任务结果信号发送失败")
-                return
+                task_id, result, error = self._results.get_nowait()
+            except queue.Empty:
+                break
+            self._deliver(task_id, result, error)
+        if self._pending == 0:
+            self._result_timer.stop()
 
     @Slot(int, object, object)
     def _deliver(self, task_id: int, result: object, error: object) -> None:
@@ -117,13 +129,22 @@ class SerialTaskRunner(QObject):
 
     @Slot()
     def close(self) -> None:
-        """停止接收任务；配置队列可选择先排空再结束。"""
+        """停止接收任务；需要排空的队列在后台完成，调用线程不等待。"""
         if self._closed.is_set():
             return
         self._closed.set()
+        try:
+            self._result_timer.stop()
+        except RuntimeError:
+            LOGGER.debug("任务队列销毁期间结果计时器已释放", exc_info=True)
         was_busy = self._pending > 0
         self._callbacks.clear()
         self._pending = 0
+        while True:
+            try:
+                self._results.get_nowait()
+            except queue.Empty:
+                break
         if not self._drain_on_close:
             while True:
                 try:
@@ -131,8 +152,6 @@ class SerialTaskRunner(QObject):
                 except queue.Empty:
                     break
         self._tasks.put(_STOP)
-        if self._drain_on_close and threading.current_thread() is not self._thread:
-            self._thread.join()
         if was_busy:
             try:
                 self.busyChanged.emit()

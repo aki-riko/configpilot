@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -124,6 +125,36 @@ class ClaudeDesktopConfigTests(unittest.TestCase):
                 self.assertTrue(config.operationBusy)
                 self.assertLess(call_elapsed, 0.1)
                 wait_for_idle(config)
+
+    def test_open_config_directory_shell_dispatch_runs_off_main_thread(self):
+        module = self.load_module()
+        main_thread = threading.get_ident()
+        opener_calls = []
+        timer_fired = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config, _, third_party = self.make_config(module, Path(tmp))
+
+            def slow_opener(target):
+                opener_calls.append((Path(target), threading.get_ident()))
+                time.sleep(0.2)
+                return True
+
+            with mock.patch.object(
+                module,
+                "open_external_target",
+                side_effect=slow_opener,
+            ):
+                QTimer.singleShot(10, lambda: timer_fired.append(True))
+                before = time.perf_counter()
+                config.openConfigDirectory()
+                elapsed = time.perf_counter() - before
+                wait_until(lambda: bool(timer_fired), timeout=0.15)
+                wait_for_idle(config)
+
+        self.assertLess(elapsed, 0.1)
+        self.assertEqual(opener_calls[0][0], third_party)
+        self.assertNotEqual(opener_calls[0][1], main_thread)
 
     def test_apply_creates_profile_enables_developer_mode_and_preserves_settings(self):
         module = self.load_module()
