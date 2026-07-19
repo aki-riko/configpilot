@@ -112,6 +112,7 @@ Fluent.Card {
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
+                Layout.alignment: Qt.AlignTop
                 spacing: Fluent.Enums.spacing.xxs
 
                 Text {
@@ -169,6 +170,7 @@ Fluent.Card {
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
+                Layout.alignment: Qt.AlignTop
                 spacing: Fluent.Enums.spacing.xxs
 
                 Text {

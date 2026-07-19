@@ -94,6 +94,7 @@ class ClaudeDesktopUiTests(unittest.TestCase):
         self.assertIn('objectName: "claudeAuthSchemeBox"', gateway)
         self.assertIn("Layout.preferredHeight: root.controlHeight", gateway)
         self.assertIn('objectName: "claudeClearKeyToggle"', gateway)
+        self.assertEqual(gateway.count("Layout.alignment: Qt.AlignTop"), 2)
 
         self.assertIn(
             "height: root.controlHeight + 2 * Fluent.Enums.spacing.m",
@@ -109,6 +110,7 @@ class ClaudeDesktopUiTests(unittest.TestCase):
         self.assertIn("/v1/models", advanced)
         self.assertIn("Fluent.Expander", advanced)
         self.assertIn("columns: width < 680 ? 1 : 2", advanced)
+        self.assertEqual(advanced.count("Layout.alignment: Qt.AlignTop"), 2)
         self.assertIn("输入 JSON 对象覆盖现有值", advanced)
         self.assertIn("敏感内容不会回显", advanced)
 
