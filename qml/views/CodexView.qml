@@ -186,6 +186,23 @@ Item {
         }
     }
 
+    Fluent.ConfirmDialog {
+        id: restoreInitialDialog
+        objectName: "restoreInitialDialog"
+        level: Fluent.Enums.statusLevel.warning
+        title: "恢复初始设置"
+        message: "只恢复 ConfigPilot 实际写入且此后未被外部修改的设置。"
+                 + "\n\n工作区信任设置（[projects.*]）以及 notify、features "
+                 + "等其它 Codex 配置不会改变。API Key 也只会在仍为 "
+                 + "ConfigPilot 写入值时恢复。"
+        messageAlignment: Text.AlignLeft
+        confirmText: "确认恢复"
+        cancelText: "取消"
+        onConfirmed: {
+            if (CodexConfig) CodexConfig.restoreInitialSettings()
+        }
+    }
+
     Fluent.ScrollArea {
         id: scrollArea
         objectName: "mainScrollArea"
@@ -361,6 +378,16 @@ Item {
                 font.pixelSize: Fluent.Enums.typography.caption
                 font.family: Fluent.Enums.fontFamily
                 elide: Text.ElideRight
+            }
+
+            Fluent.Button {
+                objectName: "restoreInitialButton"
+                style: Fluent.Enums.button.style_default
+                text: "恢复初始设置"
+                enabled: !root.configBusy
+                         && CodexConfig
+                         && CodexConfig.hasRestorableChanges
+                onClicked: restoreInitialDialog.open()
             }
 
             Fluent.Button {

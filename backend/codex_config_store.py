@@ -15,6 +15,16 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     tomllib = None
 
+from backend.codex_restore_state import (
+    ManagedChangeJournal,
+    PROVIDER_FIELD_TYPES,
+    TOP_FIELD_TYPES,
+    capture_fields,
+    file_state,
+    managed_field_names,
+    parse_config_text,
+)
+
 
 LOGGER = logging.getLogger(__name__)
 LEGACY_MANAGED_CONTEXT_CATALOG = "gpt-5.5-1m.json"
@@ -27,6 +37,7 @@ class CodexConfigStore:
         self.home = home
         self.config_path = os.path.join(home, "config.toml")
         self.auth_path = os.path.join(home, "auth.json")
+        self._journal = ManagedChangeJournal(home)
 
     @staticmethod
     def _number_to_text(value) -> str:
@@ -54,6 +65,8 @@ class CodexConfigStore:
             "modelAutoCompactTokenLimit": "",
             "toolOutputTokenLimit": "",
             "modelCatalogJson": "",
+            "hasRestorableChanges": False,
+            "restoreError": "",
         }
         config_exists = os.path.isfile(self.config_path)
         snapshot["configExists"] = config_exists
@@ -94,6 +107,11 @@ class CodexConfigStore:
         except Exception as exc:
             LOGGER.warning("读取 Codex 认证文件失败: %s", self.auth_path, exc_info=True)
             snapshot["authError"] = f"auth.json: {exc}"
+        try:
+            snapshot["hasRestorableChanges"] = self._journal.has_changes()
+        except Exception as exc:
+            LOGGER.warning("读取 ConfigPilot 恢复记录失败", exc_info=True)
+            snapshot["restoreError"] = str(exc)
         return snapshot
 
     def read_api_key(self) -> str:
@@ -229,6 +247,60 @@ class CodexConfigStore:
             )
         return block.rstrip() + f"\n{key} = {rhs}\n"
 
+    @staticmethod
+    def _provider_block_pattern(provider: str):
+        return re.compile(
+            rf"(?ms)^\s*\[model_providers\.{re.escape(provider)}\]\s*.*?"
+            r"(?=^\s*\[|\Z)"
+        )
+
+    def _set_provider_field_state(
+        self, text: str, provider: str, key: str, state: dict
+    ) -> str:
+        pattern = self._provider_block_pattern(provider)
+        match = pattern.search(text)
+        if not match and not state["present"]:
+            return text
+        if not match:
+            text = text.rstrip() + f"\n\n[model_providers.{provider}]\n"
+            match = pattern.search(text)
+        block = match.group(0)
+        value = state.get("value") if state["present"] else None
+        field_type = PROVIDER_FIELD_TYPES[key]
+        block = self._set_block_scalar(
+            block, key, value, is_str=field_type == "string"
+        )
+        return text[: match.start()] + block + text[match.end() :]
+
+    def _restore_field_state(self, text: str, field_name: str, state: dict) -> str:
+        parts = field_name.split(".")
+        if len(parts) == 2:
+            key = parts[1]
+            field_type = TOP_FIELD_TYPES[key]
+            value = state.get("value") if state["present"] else None
+            if field_type == "integer":
+                return self._set_top_integer(text, key, value)
+            return self._set_top_scalar(
+                text, key, value, is_str=field_type == "string"
+            )
+        return self._set_provider_field_state(
+            text, parts[1], parts[2], state
+        )
+
+    def _remove_empty_provider_blocks(self, text: str, providers: set[str]) -> str:
+        for provider in providers:
+            pattern = self._provider_block_pattern(provider)
+            match = pattern.search(text)
+            if not match:
+                continue
+            header = re.match(
+                rf"(?s)^\s*\[model_providers\.{re.escape(provider)}\]\s*",
+                match.group(0),
+            )
+            if header and not match.group(0)[header.end() :].strip():
+                text = text[: match.start()] + text[match.end() :]
+        return text
+
     def _write_provider_block(self, text, values):
         provider = values["provider"] or "relay"
         if not _PROVIDER_PATTERN.fullmatch(provider):
@@ -271,10 +343,7 @@ class CodexConfigStore:
                 values["modelCatalogJson"],
             )
 
-        block_re = re.compile(
-            rf"(?ms)^\s*\[model_providers\.{re.escape(provider)}\]\s*.*?"
-            r"(?=^\s*\[|\Z)"
-        )
+        block_re = self._provider_block_pattern(provider)
         match = block_re.search(text)
         if match:
             block = match.group(0)
@@ -337,14 +406,86 @@ class CodexConfigStore:
         if os.path.isfile(self.config_path):
             with open(self.config_path, "r", encoding="utf-8") as handle:
                 text = handle.read()
+        current_data = parse_config_text(text)
         new_text = self._write_provider_block(text, values)
-        if tomllib:
-            tomllib.loads(new_text)
+        new_data = parse_config_text(new_text)
+        managed_fields = managed_field_names(current_data, values, KEEP)
+        current_fields = capture_fields(current_data, managed_fields)
+        applied_fields = capture_fields(new_data, managed_fields)
+        changed_fields = [
+            name for name in managed_fields
+            if current_fields[name] != applied_fields[name]
+        ]
+        self._journal.record_config(
+            {name: current_fields[name] for name in changed_fields},
+            {name: applied_fields[name] for name in changed_fields},
+        )
         self._atomic_write_text(self.config_path, new_text)
         return self.read_snapshot()
 
     def set_key(self, key: str) -> dict:
         auth = {"OPENAI_API_KEY": key, "auth_mode": "apikey"}
         text = json.dumps(auth, ensure_ascii=False, indent=2) + "\n"
+        current_state = file_state(self.auth_path)
+        applied_state = {"present": True, "content": text}
+        if current_state != applied_state:
+            self._journal.record_auth(current_state, applied_state)
         self._atomic_write_text(self.auth_path, text)
         return self.read_snapshot()
+
+    def _build_restored_config(self, text, entries, field_names):
+        new_text = text
+        restored_providers = set()
+        for field_name in field_names:
+            new_text = self._restore_field_state(
+                new_text, field_name, entries[field_name]["original"]
+            )
+            parts = field_name.split(".")
+            if parts[0] == "provider":
+                restored_providers.add(parts[1])
+        return self._remove_empty_provider_blocks(new_text, restored_providers)
+
+    def _restore_config_entries(self, entries):
+        if not entries:
+            return 0, 0
+        if not os.path.isfile(self.config_path):
+            return 0, len(entries)
+        with open(self.config_path, "r", encoding="utf-8") as handle:
+            text = handle.read()
+        current_fields = capture_fields(parse_config_text(text), entries.keys())
+        restorable = [
+            name for name, entry in entries.items()
+            if current_fields[name] == entry["lastApplied"]
+        ]
+        new_text = self._build_restored_config(text, entries, restorable)
+        parse_config_text(new_text)
+        if new_text != text:
+            self._atomic_write_text(self.config_path, new_text)
+        return len(restorable), len(entries) - len(restorable)
+
+    def _restore_auth_entry(self, entry):
+        if entry is None:
+            return 0, 0
+        if file_state(self.auth_path) != entry["lastApplied"]:
+            return 0, 1
+        original = entry["original"]
+        if original["present"]:
+            self._atomic_write_text(self.auth_path, original["content"])
+        elif os.path.isfile(self.auth_path):
+            shutil.copy2(self.auth_path, self.auth_path + ".bak")
+            os.remove(self.auth_path)
+        return 1, 0
+
+    def restore_managed_changes(self) -> dict:
+        """恢复仍由 ConfigPilot 拥有的字段，保留工作区和外部新修改。"""
+        changes = self._journal.read_changes()
+        config_counts = self._restore_config_entries(changes["config"])
+        auth_counts = self._restore_auth_entry(changes["auth"])
+        restored = config_counts[0] + auth_counts[0]
+        skipped = config_counts[1] + auth_counts[1]
+        self._journal.clear()
+        return {
+            "snapshot": self.read_snapshot(),
+            "restored": restored,
+            "skipped": skipped,
+        }

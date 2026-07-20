@@ -66,6 +66,7 @@ class CodexConfig(QObject):
         self._model_auto_compact_token_limit = ""
         self._tool_output_token_limit = ""
         self._model_catalog_json = ""
+        self._has_restorable_changes = False
         self._available_models = []
         self._models_loading = False
         self._reasoning_refresh_pending = False
@@ -211,6 +212,10 @@ class CodexConfig(QObject):
     def configExists(self):
         return self._config_exists
 
+    @Property(bool, notify=changed)
+    def hasRestorableChanges(self):
+        return self._has_restorable_changes
+
     @Property(bool, notify=operationBusyChanged)
     def operationBusy(self):
         return self._config_tasks.busy
@@ -245,10 +250,16 @@ class CodexConfig(QObject):
         )
         self._tool_output_token_limit = str(snapshot["toolOutputTokenLimit"])
         self._model_catalog_json = str(snapshot["modelCatalogJson"])
+        self._has_restorable_changes = bool(
+            snapshot.get("hasRestorableChanges", False)
+        )
         self.changed.emit()
         auth_error = str(snapshot.get("authError", ""))
         if auth_error:
             self.notify.emit(2, "认证读取失败", auth_error)
+        restore_error = str(snapshot.get("restoreError", ""))
+        if restore_error:
+            self.notify.emit(3, "恢复记录读取失败", restore_error)
 
     def _config_read_failed(self, exc):
         LOGGER.exception(
@@ -418,21 +429,36 @@ class CodexConfig(QObject):
             self._config_write_failed,
         )
 
+    def _complete_restore(self, result):
+        self._apply_snapshot(result["snapshot"])
+        restored = int(result["restored"])
+        skipped = int(result["skipped"])
+        if restored:
+            message = f"已恢复 {restored} 项 ConfigPilot 修改"
+            if skipped:
+                message += f"；{skipped} 项已有外部修改，未覆盖"
+            message += "。请完全重启 Codex 生效"
+            self.notify.emit(1, "已恢复初始设置", message)
+        elif skipped:
+            self.notify.emit(
+                2,
+                "未覆盖外部修改",
+                f"{skipped} 项设置已在 ConfigPilot 外部改变，全部保留",
+            )
+        else:
+            self.notify.emit(0, "无需恢复", "没有 ConfigPilot 修改记录")
+
     @Slot()
-    def resetDefault(self):
-        """重置为默认: 用 providers.json 第一个预置覆盖当前配置。"""
-        if not self._presets:
-            self.notify.emit(2, "无默认", "providers.json 没有预置项可作默认")
+    def restoreInitialSettings(self):
+        """只恢复 ConfigPilot 记录过且此后未被外部修改的设置。"""
+        if not self._has_restorable_changes:
+            self.notify.emit(0, "无需恢复", "没有 ConfigPilot 修改记录")
             return
-        p = self._presets[0]
-        model = p.get("model", DEFAULT_MODEL)
-        self.applyConfig({
-            "baseUrl": p.get("baseUrl", ""),
-            "provider": p.get("provider", "relay"),
-            "wireApi": p.get("wireApi", DEFAULT_WIRE_API),
-            "model": model,
-            "reasoningEffort": self._model_profiles.highest_reasoning_effort(model),
-        })
+        self._config_tasks.submit(
+            self._store.restore_managed_changes,
+            self._complete_restore,
+            self._config_write_failed,
+        )
 
     # ---------- 写 auth.json 的 key ----------
     @Slot(str)
